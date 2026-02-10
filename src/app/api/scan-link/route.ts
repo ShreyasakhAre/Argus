@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { scanLink, scanTextForLinks } from '@/lib/link-scanner';
+import { createDatasetRecord } from '@/lib/dataset';
+import { createScanNotification } from '@/app/api/notifications/manage/route';
 
 export async function POST(request: NextRequest) {
   try {
@@ -8,10 +10,22 @@ export async function POST(request: NextRequest) {
 
     if (text) {
       const results = scanTextForLinks(text);
+      
+      // Store each result in dataset for ML training
+      results.forEach(result => {
+        createDatasetRecord({
+          url: result.url,
+          features: result.features,
+          risk_score: result.risk_score,
+          risk_level: result.risk_level,
+          threat_reasons: result.threat_reasons
+        });
+      });
+
       return NextResponse.json({
         urls_found: results.length,
         results,
-        has_malicious: results.some(r => r.is_malicious),
+        has_malicious: results.some(r => r.risk_score >= 70),
         highest_risk: results.length > 0 ? Math.max(...results.map(r => r.risk_score)) : 0
       });
     }
@@ -24,10 +38,45 @@ export async function POST(request: NextRequest) {
     }
 
     const result = scanLink(url);
-    return NextResponse.json(result);
-  } catch {
+
+    // Store result in dataset for ML training pipeline
+    createDatasetRecord({
+      url: result.url,
+      features: result.features,
+      risk_score: result.risk_score,
+      risk_level: result.risk_level,
+      threat_reasons: result.threat_reasons
+    });
+
+    // Create notification for all severity levels
+    const notification = createScanNotification(
+      result.url,
+      result.risk_level,
+      result.risk_score,
+      result.explanation
+    );
+
+    // Add notification to store
+    const notificationResponse = await fetch(
+      'http://localhost:3000/api/notifications/manage',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create',
+          ...notification
+        })
+      }
+    ).catch(() => null);
+
+    return NextResponse.json({
+      ...result,
+      notification: notification
+    });
+  } catch (error) {
+    console.error('Scan link error:', error);
     return NextResponse.json(
-      { error: 'Invalid request body' },
+      { error: error instanceof Error ? error.message : 'Invalid request body' },
       { status: 400 }
     );
   }

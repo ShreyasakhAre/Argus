@@ -12,6 +12,7 @@ import { EmployeeDashboard } from '@/components/dashboards/employee-dashboard';
 import { AuditorDashboard } from '@/components/dashboards/auditor-dashboard';
 import { Shield, Eye, Activity, RefreshCw, LogOut, Sun, Moon, Search, Building2, User, FileText } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import NotificationBell from "@/components/ui/NotificationBell";
 
 const AnalystDashboard = dynamic(
   () => import('@/components/dashboards/analyst-dashboard').then((mod) => mod.AnalystDashboard),
@@ -69,7 +70,7 @@ function Header() {
             </div>
             <div>
               <h1 className="text-xl font-bold text-foreground tracking-tight">ARGUS</h1>
-              <p className="text-xs text-muted-foreground font-medium">Fraud Detection System</p>
+              <p className="text-xs text-muted-foreground font-medium">Centralized Notification Dashboard</p>
             </div>
           </div>
           
@@ -92,6 +93,8 @@ function Header() {
               </Badge>
               <span className="text-sm text-muted-foreground hidden sm:inline">{user.orgId}</span>
             </div>
+
+            <NotificationBell />
 
             <Button
               variant="outline"

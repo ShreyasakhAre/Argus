@@ -367,7 +367,7 @@ function NotificationCard({
                     <Eye className="w-4 h-4 mr-1" /> Review
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="bg-card border-border max-w-2xl max-h-[90vh] overflow-y-auto">
+                <DialogContent className="bg-card border-border max-w-4xl">
                   <DialogHeader>
                     <DialogTitle className="text-foreground flex items-center gap-2">
                       <AlertTriangle className="w-5 h-5 text-red-500" />
@@ -440,12 +440,12 @@ function NotificationCard({
                                 </div>
                                 <p className="text-sm text-muted-foreground mb-2">{result.explanation}</p>
                                 <div className="flex flex-wrap gap-1">
-                                  {result.features.filter(f => f.risk_impact === 'positive').slice(0, 4).map((f, i) => (
+                                  {result.feature_breakdown.filter(f => f.risk_impact === 'positive').slice(0, 4).map((f, i) => (
                                     <Badge key={i} className="bg-red-500/10 text-red-300 text-xs">
                                       {f.feature.replace(/_/g, ' ')}
                                     </Badge>
                                   ))}
-                                  {result.features.filter(f => f.risk_impact === 'negative').slice(0, 2).map((f, i) => (
+                                  {result.feature_breakdown.filter(f => f.risk_impact === 'negative').slice(0, 2).map((f, i) => (
                                     <Badge key={i} className="bg-green-500/10 text-green-300 text-xs">
                                       {f.feature.replace(/_/g, ' ')}
                                     </Badge>

@@ -1,10 +1,48 @@
+import { 
+  calculateRiskScore, 
+  RiskAssessment, 
+  getRiskLevelExplanation 
+} from './security/riskScoring';
+import {
+  isRiskyDomain,
+  isTrustedDomain,
+  containsPhishingKeywords,
+  containsDangerousExtension
+} from './security/riskyDomains';
+
+export interface URLFeatures {
+  protocol: string;
+  full_hostname: string;
+  root_domain: string;
+  subdomain: string;
+  subdomain_length: number;
+  subdomain_levels: number;
+  entropy_score: number;
+  is_hex_pattern: boolean;
+  suspicious_keywords_found: string[];
+  suspicious_tld: boolean;
+  is_risky_infrastructure: boolean;
+  url_length: number;
+  special_char_ratio: number;
+  digit_ratio: number;
+  has_at_symbol: boolean;
+  uses_ip_address: boolean;
+  has_double_extension: boolean;
+  dash_count: number;
+  uses_https: boolean;
+  url_shortener: boolean;
+  known_legitimate: boolean;
+}
+
 export interface LinkScanResult {
   url: string;
   is_malicious: boolean;
   risk_score: number;
-  risk_level: 'Low' | 'Medium' | 'High';
+  risk_level: 'Safe' | 'Suspicious' | 'Critical';
   explanation: string;
-  features: {
+  threat_reasons: string[];
+  features: URLFeatures;
+  feature_breakdown: {
     feature: string;
     value: string | number | boolean;
     risk_impact: 'positive' | 'negative' | 'neutral';
@@ -12,215 +50,327 @@ export interface LinkScanResult {
   }[];
 }
 
-const SUSPICIOUS_KEYWORDS = [
-  'login', 'signin', 'verify', 'secure', 'account', 'update', 'confirm',
-  'banking', 'paypal', 'amazon', 'microsoft', 'apple', 'google', 'netflix',
-  'password', 'credential', 'suspended', 'urgent', 'expire', 'locked',
-  'winner', 'prize', 'free', 'gift', 'claim', 'reward', 'lucky'
-];
+/**
+ * FEATURE EXTRACTION
+ * Analyzes URL structure and extracts 20+ security-relevant features
+ */
+function extractFeatures(url: string): URLFeatures {
+  const emptyFeatures: URLFeatures = {
+    protocol: '',
+    full_hostname: '',
+    root_domain: '',
+    subdomain: '',
+    subdomain_length: 0,
+    subdomain_levels: 0,
+    entropy_score: 0,
+    is_hex_pattern: false,
+    suspicious_keywords_found: [],
+    suspicious_tld: false,
+    is_risky_infrastructure: false,
+    url_length: url.length,
+    special_char_ratio: 0,
+    digit_ratio: 0,
+    has_at_symbol: url.includes('@'),
+    uses_ip_address: false,
+    has_double_extension: false,
+    dash_count: 0,
+    uses_https: url.startsWith('https'),
+    url_shortener: false,
+    known_legitimate: false
+  };
 
-const SUSPICIOUS_TLDS = [
-  '.xyz', '.top', '.club', '.work', '.click', '.link', '.gq', '.ml', '.cf',
-  '.tk', '.ga', '.pw', '.cc', '.su', '.buzz', '.rest', '.fit'
-];
-
-const LEGITIMATE_DOMAINS = [
-  'google.com', 'microsoft.com', 'apple.com', 'amazon.com', 'github.com',
-  'linkedin.com', 'facebook.com', 'twitter.com', 'youtube.com', 'netflix.com',
-  'paypal.com', 'dropbox.com', 'slack.com', 'zoom.us', 'salesforce.com'
-];
-
-function extractFeatures(url: string): LinkScanResult['features'] {
-  const features: LinkScanResult['features'] = [];
-  
   let parsedUrl: URL;
   try {
     parsedUrl = new URL(url.startsWith('http') ? url : `http://${url}`);
   } catch {
-    return [{
-      feature: 'invalid_url',
-      value: true,
-      risk_impact: 'positive',
-      description: 'URL format is invalid'
-    }];
+    return emptyFeatures;
   }
 
-  const hostname = parsedUrl.hostname.toLowerCase();
+  const hostname = parsedUrl.hostname?.toLowerCase() || '';
   const fullUrl = parsedUrl.href.toLowerCase();
   const path = parsedUrl.pathname.toLowerCase();
+  const search = parsedUrl.search.toLowerCase();
 
-  features.push({
-    feature: 'url_length',
-    value: url.length,
-    risk_impact: url.length > 75 ? 'positive' : url.length > 50 ? 'neutral' : 'negative',
-    description: url.length > 75 ? 'Unusually long URL (often used in phishing)' : 
-                 url.length > 50 ? 'Moderate URL length' : 'Normal URL length'
-  });
+  // Extract hostname components
+  const hostParts = hostname.split('.');
+  const rootDomain = hostParts.slice(-2).join('.');
+  const subdomainParts = hostParts.slice(0, -2);
+  const subdomain = subdomainParts.join('.');
 
-  const isHttps = parsedUrl.protocol === 'https:';
-  features.push({
-    feature: 'uses_https',
-    value: isHttps,
-    risk_impact: isHttps ? 'negative' : 'positive',
-    description: isHttps ? 'Uses secure HTTPS protocol' : 'Missing HTTPS encryption'
-  });
+  // Calculate special character and digit ratios
+  const specialChars = (url.match(/[@!#$%^&*()_+=\[\]{}|\\:;"'<>,?/]/g) || []).length;
+  const digits = (url.match(/\d/g) || []).length;
+  const special_char_ratio = url.length > 0 ? specialChars / url.length : 0;
+  const digit_ratio = url.length > 0 ? digits / url.length : 0;
 
+  // Calculate Shannon entropy of subdomain
+  const calculateShannonEntropy = (str: string): number => {
+    const len = str.length;
+    if (len === 0) return 0;
+    const freq: Record<string, number> = {};
+    for (const char of str.toLowerCase()) {
+      freq[char] = (freq[char] || 0) + 1;
+    }
+    let entropy = 0;
+    for (const char in freq) {
+      const p = freq[char] / len;
+      entropy -= p * Math.log2(p);
+    }
+    return entropy;
+  };
+
+  const entropyScore = subdomain.length > 0 ? calculateShannonEntropy(subdomain) : 0;
+
+  // Check for hex-only pattern (ENHANCED: longer threshold for better detection)
+  const isHexPattern = /^[a-f0-9]{12,}$/i.test(subdomain) && subdomain.length >= 12;
+
+  // Find suspicious keywords including URL path and parameters
+  const foundKeywords = [
+    ...containsPhishingKeywords(fullUrl),
+    ...(path.includes('malware') ? ['malware'] : []),
+    ...(path.includes('payload') ? ['payload'] : []),
+    ...(path.includes('shell') ? ['shell'] : []),
+    ...(path.includes('admin') && !isTrustedDomain(hostname) ? ['admin'] : []),
+    ...(path.includes('wp-admin') && !hostname.includes('wordpress.com') ? ['wp-admin'] : []),
+    ...(path.includes('backdoor') ? ['backdoor'] : []),
+    ...(search.includes('phishing') ? ['phishing'] : []),
+  ];
+
+  // Check for risky infrastructure (NOW CENTRALIZED)
+  const isRiskyInfra = isRiskyDomain(hostname);
+
+  // IP address detection
   const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
   const usesIp = ipPattern.test(hostname);
-  features.push({
-    feature: 'uses_ip_address',
-    value: usesIp,
-    risk_impact: usesIp ? 'positive' : 'negative',
-    description: usesIp ? 'Uses IP address instead of domain (suspicious)' : 'Uses domain name'
-  });
 
-  const foundKeywords = SUSPICIOUS_KEYWORDS.filter(kw => fullUrl.includes(kw));
-  features.push({
-    feature: 'suspicious_keywords',
-    value: foundKeywords.length,
-    risk_impact: foundKeywords.length > 2 ? 'positive' : foundKeywords.length > 0 ? 'neutral' : 'negative',
-    description: foundKeywords.length > 0 ? 
-      `Contains suspicious keywords: ${foundKeywords.slice(0, 3).join(', ')}` : 
-      'No suspicious keywords detected'
-  });
+  // Double extension detection
+  const hasDoubleExt = containsDangerousExtension(fullUrl) !== null;
 
-  const hasSuspiciousTld = SUSPICIOUS_TLDS.some(tld => hostname.endsWith(tld));
-  features.push({
-    feature: 'suspicious_tld',
-    value: hasSuspiciousTld,
-    risk_impact: hasSuspiciousTld ? 'positive' : 'negative',
-    description: hasSuspiciousTld ? 'Uses suspicious top-level domain' : 'Uses common top-level domain'
-  });
-
-  const subdomainCount = hostname.split('.').length - 2;
-  features.push({
-    feature: 'subdomain_count',
-    value: subdomainCount,
-    risk_impact: subdomainCount > 2 ? 'positive' : subdomainCount > 1 ? 'neutral' : 'negative',
-    description: subdomainCount > 2 ? 'Excessive subdomains (potential spoofing)' : 
-                 subdomainCount > 1 ? 'Multiple subdomains' : 'Normal subdomain structure'
-  });
-
-  const specialChars = (url.match(/[@!#$%^&*()_+=\[\]{}|\\:;"'<>,?]/g) || []).length;
-  features.push({
-    feature: 'special_characters',
-    value: specialChars,
-    risk_impact: specialChars > 5 ? 'positive' : specialChars > 2 ? 'neutral' : 'negative',
-    description: specialChars > 5 ? 'Many special characters (obfuscation attempt)' : 
-                 specialChars > 2 ? 'Some special characters' : 'Minimal special characters'
-  });
-
-  const hasAtSymbol = url.includes('@');
-  features.push({
-    feature: 'contains_at_symbol',
-    value: hasAtSymbol,
-    risk_impact: hasAtSymbol ? 'positive' : 'negative',
-    description: hasAtSymbol ? 'Contains @ symbol (URL spoofing technique)' : 'No @ symbol'
-  });
-
-  const hasShortenedPattern = /bit\.ly|goo\.gl|tinyurl|t\.co|ow\.ly|is\.gd|buff\.ly|adf\.ly|j\.mp/i.test(hostname);
-  features.push({
-    feature: 'url_shortener',
-    value: hasShortenedPattern,
-    risk_impact: hasShortenedPattern ? 'neutral' : 'negative',
-    description: hasShortenedPattern ? 'Uses URL shortening service (hides destination)' : 'Direct URL'
-  });
-
-  const isLegitimate = LEGITIMATE_DOMAINS.some(domain => 
-    hostname === domain || hostname.endsWith(`.${domain}`)
-  );
-  features.push({
-    feature: 'known_legitimate',
-    value: isLegitimate,
-    risk_impact: isLegitimate ? 'negative' : 'neutral',
-    description: isLegitimate ? 'Recognized legitimate domain' : 'Unknown domain reputation'
-  });
-
-  const hasDoubleExtension = /\.(exe|zip|rar|js|vbs|bat|cmd|scr|pif)\./i.test(path);
-  features.push({
-    feature: 'double_extension',
-    value: hasDoubleExtension,
-    risk_impact: hasDoubleExtension ? 'positive' : 'negative',
-    description: hasDoubleExtension ? 'Suspicious double file extension' : 'Normal file extension'
-  });
-
+  // Count dashes in hostname
   const dashCount = hostname.split('-').length - 1;
-  features.push({
-    feature: 'excessive_dashes',
-    value: dashCount,
-    risk_impact: dashCount > 3 ? 'positive' : dashCount > 1 ? 'neutral' : 'negative',
-    description: dashCount > 3 ? 'Excessive dashes in domain (typosquatting indicator)' : 
-                 dashCount > 1 ? 'Some dashes in domain' : 'Normal domain format'
-  });
 
-  return features;
-}
+  // Check for suspicious TLD (simple heuristic)
+  const suspiciousTlds = [
+    '.xyz', '.top', '.club', '.work', '.click', '.link', '.gq', '.ml', '.cf',
+    '.tk', '.ga', '.pw', '.cc', '.su', '.buzz', '.rest', '.fit',
+    '.stream', '.download', '.review', '.men', '.date', '.webcam', '.loan',
+    '.online', '.tech', '.website', '.site', '.space'
+  ];
+  const hasSuspiciousTld = suspiciousTlds.some(tld => hostname.endsWith(tld));
 
-function calculateRiskScore(features: LinkScanResult['features']): number {
-  const weights: Record<string, number> = {
-    invalid_url: 0.95,
-    uses_ip_address: 0.25,
-    uses_https: -0.15,
-    suspicious_keywords: 0.08,
-    suspicious_tld: 0.20,
-    subdomain_count: 0.05,
-    special_characters: 0.03,
-    contains_at_symbol: 0.20,
-    url_shortener: 0.10,
-    known_legitimate: -0.30,
-    double_extension: 0.25,
-    excessive_dashes: 0.05,
-    url_length: 0.02
-  };
+  // URL shortener detection
+  const hasUrlShortener = /bit\.ly|goo\.gl|tinyurl|t\.co|ow\.ly|is\.gd|buff\.ly|adf\.ly|j\.mp|shorte\.st|tr\.im|v\.gd|tiny\.cc/i.test(hostname);
 
-  let score = 0.3;
-
-  for (const feature of features) {
-    const weight = weights[feature.feature] || 0;
-    
-    if (typeof feature.value === 'boolean') {
-      score += feature.value ? weight : 0;
-    } else if (typeof feature.value === 'number') {
-      score += Math.min(feature.value * weight, weight * 5);
-    }
-  }
-
-  return Math.max(0, Math.min(1, score));
-}
-
-function generateExplanation(features: LinkScanResult['features'], riskScore: number): string {
-  const highRiskFeatures = features.filter(f => f.risk_impact === 'positive');
-  const safeFeatures = features.filter(f => f.risk_impact === 'negative');
-
-  if (riskScore >= 0.7) {
-    const reasons = highRiskFeatures.slice(0, 3).map(f => f.description.toLowerCase()).join(', ');
-    return `This URL is likely malicious. Key indicators: ${reasons}. Exercise extreme caution and avoid clicking.`;
-  } else if (riskScore >= 0.4) {
-    const concerns = highRiskFeatures.slice(0, 2).map(f => f.description.toLowerCase()).join(', ');
-    return `This URL shows some suspicious characteristics: ${concerns}. Verify the source before proceeding.`;
-  } else {
-    const positives = safeFeatures.slice(0, 2).map(f => f.description.toLowerCase()).join(', ');
-    return `This URL appears relatively safe. Positive indicators: ${positives}. Standard security practices still recommended.`;
-  }
-}
-
-export function scanLink(url: string): LinkScanResult {
-  const features = extractFeatures(url);
-  const riskScore = calculateRiskScore(features);
-  const isMalicious = riskScore >= 0.6;
-  const riskLevel = riskScore >= 0.7 ? 'High' : riskScore >= 0.4 ? 'Medium' : 'Low';
-  const explanation = generateExplanation(features, riskScore);
+  // Legitimate domain check (NOW CENTRALIZED)
+  const isLegit = isTrustedDomain(hostname);
 
   return {
-    url,
-    is_malicious: isMalicious,
-    risk_score: Math.round(riskScore * 100) / 100,
-    risk_level: riskLevel,
-    explanation,
-    features: features.filter(f => f.risk_impact !== 'neutral' || f.value)
+    protocol: parsedUrl.protocol.replace(':', ''),
+    full_hostname: hostname,
+    root_domain: rootDomain,
+    subdomain: subdomain,
+    subdomain_length: subdomain.length,
+    subdomain_levels: subdomainParts.length,
+    entropy_score: parseFloat(entropyScore.toFixed(2)),
+    is_hex_pattern: isHexPattern,
+    suspicious_keywords_found: foundKeywords,
+    suspicious_tld: hasSuspiciousTld,
+    is_risky_infrastructure: isRiskyInfra,
+    url_length: url.length,
+    special_char_ratio: parseFloat(special_char_ratio.toFixed(3)),
+    digit_ratio: parseFloat(digit_ratio.toFixed(3)),
+    has_at_symbol: url.includes('@'),
+    uses_ip_address: usesIp,
+    has_double_extension: hasDoubleExt,
+    dash_count: dashCount,
+    uses_https: parsedUrl.protocol === 'https:',
+    url_shortener: hasUrlShortener,
+    known_legitimate: isLegit
   };
 }
 
+/**
+ * GENERATE FEATURE BREAKDOWN
+ * Converts features to UI table format
+ */
+function generateFeatureBreakdown(features: URLFeatures): LinkScanResult['feature_breakdown'] {
+  const breakdown: LinkScanResult['feature_breakdown'] = [];
+
+  breakdown.push({
+    feature: 'Protocol',
+    value: features.protocol.toUpperCase(),
+    risk_impact: features.uses_https ? 'neutral' : 'positive',
+    description: features.uses_https ? 'HTTPS (encrypted, but doesn\'t guarantee safety)' : 'HTTP (unencrypted)'
+  });
+
+  breakdown.push({
+    feature: 'Hostname',
+    value: features.full_hostname,
+    risk_impact: 'neutral',
+    description: 'Full domain name'
+  });
+
+  breakdown.push({
+    feature: 'Root Domain',
+    value: features.root_domain,
+    risk_impact: features.known_legitimate ? 'negative' : 'neutral',
+    description: features.known_legitimate ? 'Known legitimate domain' : 'Domain reputation unknown'
+  });
+
+  breakdown.push({
+    feature: 'Risky Infrastructure',
+    value: features.is_risky_infrastructure ? 'YES' : 'NO',
+    risk_impact: features.is_risky_infrastructure ? 'positive' : 'negative',
+    description: features.is_risky_infrastructure ? 'Abused hosting or tunnel detected' : 'Regular domain'
+  });
+
+  breakdown.push({
+    feature: 'Suspicious Keywords',
+    value: features.suspicious_keywords_found.length,
+    risk_impact: features.suspicious_keywords_found.length > 0 ? 'positive' : 'negative',
+    description: features.suspicious_keywords_found.length > 0 ? 
+      `Found: ${features.suspicious_keywords_found.join(', ')}` : 'None detected'
+  });
+
+  breakdown.push({
+    feature: 'URL Shortener',
+    value: features.url_shortener ? 'YES' : 'NO',
+    risk_impact: features.url_shortener ? 'positive' : 'negative',
+    description: features.url_shortener ? 'Destination hidden' : 'Direct link'
+  });
+
+  breakdown.push({
+    feature: 'Subdomain Entropy',
+    value: features.entropy_score.toFixed(2),
+    risk_impact: features.entropy_score > 4.2 ? 'positive' : features.entropy_score > 3.5 ? 'positive' : 'negative',
+    description: features.entropy_score > 4.2 ? 'CRITICAL: Highly randomized' : 
+                 features.entropy_score > 3.5 ? 'HIGH: Suspicious randomization' : 'Normal'
+  });
+
+  breakdown.push({
+    feature: 'Hex Pattern',
+    value: features.is_hex_pattern ? 'YES' : 'NO',
+    risk_impact: features.is_hex_pattern ? 'positive' : 'negative',
+    description: features.is_hex_pattern ? 'Bot-generated domain indicator' : 'Normal subdomain'
+  });
+
+  breakdown.push({
+    feature: 'IP Address',
+    value: features.uses_ip_address ? 'YES' : 'NO',
+    risk_impact: features.uses_ip_address ? 'positive' : 'negative',
+    description: features.uses_ip_address ? 'Direct IP (phishing technique)' : 'Uses domain name'
+  });
+
+  breakdown.push({
+    feature: '@ Symbol',
+    value: features.has_at_symbol ? 'YES' : 'NO',
+    risk_impact: features.has_at_symbol ? 'positive' : 'negative',
+    description: features.has_at_symbol ? 'Email spoofing detected' : 'Not present'
+  });
+
+  breakdown.push({
+    feature: 'Double Extension',
+    value: features.has_double_extension ? 'YES' : 'NO',
+    risk_impact: features.has_double_extension ? 'positive' : 'negative',
+    description: features.has_double_extension ? 'File spoofing technique' : 'Normal'
+  });
+
+  breakdown.push({
+    feature: 'URL Length',
+    value: features.url_length,
+    risk_impact: features.url_length > 100 ? 'positive' : 'negative',
+    description: features.url_length > 100 ? 'Unusually long (obfuscation)' : 'Normal length'
+  });
+
+  return breakdown;
+}
+
+/**
+ * MAIN SCAN FUNCTION
+ * Uses centralized risk scoring engine
+ */
+export function scanLink(url: string): LinkScanResult {
+  try {
+    const features = extractFeatures(url);
+    const assessment = calculateRiskScore(url);
+    
+    // Determine risk level based on score
+    let riskLevel: 'Safe' | 'Suspicious' | 'Critical' = 'Safe';
+    
+    if (assessment.finalScore >= 70) {
+      riskLevel = 'Critical';
+    } else if (assessment.finalScore >= 40) {
+      riskLevel = 'Suspicious';
+    }
+    
+    const explanation = getRiskLevelExplanation(riskLevel).description;
+    const featureBreakdown = generateFeatureBreakdown(features);
+
+    // Flag as malicious if:
+    // 1. Risk score >= 40 (SUSPICIOUS or CRITICAL)
+    // 2. Has risky domain infrastructure
+    // 3. Has dangerous executable extensions
+    const isRiskyInfra = features.is_risky_infrastructure;
+    const hasDangerousExt = features.suspicious_keywords_found.some(k => 
+      k.includes('.exe') || k.includes('.zip') || k.includes('.bat') || k.includes('.scr')
+    );
+    
+    const is_malicious = 
+      assessment.finalScore >= 40 ||
+      isRiskyInfra ||
+      hasDangerousExt;
+
+    return {
+      url,
+      is_malicious,
+      risk_score: assessment.finalScore,
+      risk_level: riskLevel,
+      explanation,
+      threat_reasons: assessment.reasons.length > 0 ? assessment.reasons : ['No major threats detected'],
+      features,
+      feature_breakdown: featureBreakdown
+    };
+  } catch (error) {
+    // Fallback for malformed URLs
+    return {
+      url,
+      is_malicious: false,
+      risk_score: 0,
+      risk_level: 'Safe',
+      explanation: 'Could not analyze URL',
+      threat_reasons: [],
+      features: {
+        protocol: '',
+        full_hostname: '',
+        root_domain: '',
+        subdomain: '',
+        subdomain_length: 0,
+        subdomain_levels: 0,
+        entropy_score: 0,
+        is_hex_pattern: false,
+        suspicious_keywords_found: [],
+        suspicious_tld: false,
+        is_risky_infrastructure: false,
+        url_length: url.length,
+        special_char_ratio: 0,
+        digit_ratio: 0,
+        has_at_symbol: false,
+        uses_ip_address: false,
+        has_double_extension: false,
+        dash_count: 0,
+        uses_https: false,
+        url_shortener: false,
+        known_legitimate: false
+      },
+      feature_breakdown: []
+    };
+  }
+}
+
+
+/**
+ * UTILITY FUNCTIONS
+ */
 export function extractUrlsFromText(text: string): string[] {
   const urlPattern = /https?:\/\/[^\s<>"{}|\\^`\[\]]+|www\.[^\s<>"{}|\\^`\[\]]+/gi;
   const matches = text.match(urlPattern) || [];
@@ -231,3 +381,4 @@ export function scanTextForLinks(text: string): LinkScanResult[] {
   const urls = extractUrlsFromText(text);
   return urls.map(url => scanLink(url));
 }
+

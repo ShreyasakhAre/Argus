@@ -1,25 +1,43 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useRole } from '@/components/role-provider';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
-import { AlertTriangle, CheckCircle, Activity, TrendingUp, RefreshCw, Shield, Download, QrCode } from 'lucide-react';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, LineChart, Line, AreaChart, Area
+} from 'recharts';
+import {
+  AlertTriangle, CheckCircle, Activity, TrendingUp, RefreshCw, Shield,
+  Download, QrCode, Zap, Users, Target
+} from 'lucide-react';
 import { AlertPanel } from '@/components/alert-panel';
 import { ThreatPatterns } from '@/components/threat-patterns';
 import { AnalyticsPanel } from '@/components/analytics-panel';
 import { ScannerTools } from '@/components/scanner-tools';
+import { AdminRolesPanel } from '@/components/admin-roles-panel';
+import { SidebarNav } from '@/components/dashboards/sidebar-nav';
+import { PremiumCard, PremiumCardHeader, PremiumCardTitle, PremiumCardContent, PremiumCardFooter } from '@/components/ui/premium-card';
 import type { Stats } from '@/lib/ml-service';
+import NotificationsFeed from "@/components/notifications-feed";
 
-const COLORS = ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899'];
+const COLORS = ['#ef4444', '#f97316', '#eab308', '#06b6d4', '#3b82f6', '#8b5cf6'];
+
+interface StatCard {
+  title: string;
+  value: string | number;
+  subtitle?: string;
+  icon: React.ReactNode;
+  trend?: number;
+  color: 'red' | 'orange' | 'yellow' | 'cyan' | 'blue' | 'purple';
+}
 
 export function AdminDashboard() {
   const { orgId } = useRole();
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [retraining, setRetraining] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'threats' | 'analytics' | 'scanners'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'threats' | 'analytics' | 'scanners' | 'permissions'>('overview');
 
   useEffect(() => {
     fetchStats();
@@ -27,10 +45,16 @@ export function AdminDashboard() {
 
   const fetchStats = async () => {
     setLoading(true);
-    const res = await fetch('/api/stats');
-    const data = await res.json();
-    setStats(data);
-    setLoading(false);
+    try {
+      const res = await fetch('/api/stats');
+      if (!res.ok) throw new Error('Failed to fetch stats');
+      const data = await res.json();
+      setStats(data);
+    } catch (e) {
+      console.error('Failed to load stats:', e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleRetrain = async () => {
@@ -52,7 +76,12 @@ export function AdminDashboard() {
   };
 
   if (loading || !stats) {
-    return <div className="flex items-center justify-center h-64"><RefreshCw className="w-8 h-8 animate-spin text-primary" /></div>;
+    return (
+      <div className="flex flex-col items-center justify-center h-64 gap-4">
+        <RefreshCw className="w-8 h-8 animate-spin text-cyan-400" />
+        <p className="text-slate-400">Loading dashboard...</p>
+      </div>
+    );
   }
 
   const pieData = [
@@ -68,204 +97,306 @@ export function AdminDashboard() {
   }));
 
   const trendData = [
-    { day: 'Mon', flagged: 3, total: 15 },
-    { day: 'Tue', flagged: 5, total: 18 },
-    { day: 'Wed', flagged: 2, total: 12 },
-    { day: 'Thu', flagged: 4, total: 20 },
-    { day: 'Fri', flagged: 3, total: 16 },
+    { day: 'Mon', flagged: 3, total: 15, risk: 20 },
+    { day: 'Tue', flagged: 5, total: 18, risk: 28 },
+    { day: 'Wed', flagged: 2, total: 12, risk: 17 },
+    { day: 'Thu', flagged: 4, total: 20, risk: 24 },
+    { day: 'Fri', flagged: 3, total: 16, risk: 19 },
   ];
 
+  const statCards: StatCard[] = [
+    {
+      title: 'Total Notifications',
+      value: stats.total_notifications,
+      subtitle: 'All time',
+      icon: <Activity className="w-6 h-6" />,
+      trend: 12,
+      color: 'cyan',
+    },
+    {
+      title: 'Flagged Alerts',
+      value: stats.flagged_notifications,
+      subtitle: 'Requires action',
+      icon: <AlertTriangle className="w-6 h-6" />,
+      trend: -5,
+      color: 'red',
+    },
+    {
+      title: 'Benign',
+      value: stats.benign_notifications,
+      subtitle: 'Cleared',
+      icon: <CheckCircle className="w-6 h-6" />,
+      trend: 8,
+      color: 'blue',
+    },
+    {
+      title: 'Model Accuracy',
+      value: `${Math.round(stats.model_metrics.accuracy * 100)}%`,
+      subtitle: 'Performance',
+      icon: <TrendingUp className="w-6 h-6" />,
+      color: 'blue',
+    },
+  ];
+
+  const getColorClasses = (color: string) => {
+    const colors: Record<string, { bg: string; icon: string; text: string; border: string }> = {
+      red: { bg: 'bg-red-500/10', icon: 'text-red-400', text: 'text-red-300', border: 'border-red-500/20' },
+      orange: { bg: 'bg-orange-500/10', icon: 'text-orange-400', text: 'text-orange-300', border: 'border-orange-500/20' },
+      yellow: { bg: 'bg-yellow-500/10', icon: 'text-yellow-400', text: 'text-yellow-300', border: 'border-yellow-500/20' },
+      cyan: { bg: 'bg-cyan-500/10', icon: 'text-cyan-400', text: 'text-cyan-300', border: 'border-cyan-500/20' },
+      blue: { bg: 'bg-blue-500/10', icon: 'text-blue-400', text: 'text-blue-300', border: 'border-blue-500/20' },
+      green: { bg: 'bg-green-500/10', icon: 'text-green-400', text: 'text-green-300', border: 'border-green-500/20' },
+      purple: { bg: 'bg-purple-500/10', icon: 'text-purple-400', text: 'text-purple-300', border: 'border-purple-500/20' },
+    };
+    return colors[color] || colors.cyan;
+  };
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-foreground">Admin Dashboard</h2>
-          <p className="text-muted-foreground">System overview and ML model management</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => handleExport('csv')}>
-            <Download className="w-4 h-4 mr-1" /> CSV
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => handleExport('json')}>
-            <Download className="w-4 h-4 mr-1" /> JSON
-          </Button>
-          <Button onClick={handleRetrain} disabled={retraining} className="bg-primary hover:bg-primary/90">
-            <RefreshCw className={`w-4 h-4 mr-2 ${retraining ? 'animate-spin' : ''}`} />
-            {retraining ? 'Retraining...' : 'Retrain Model'}
-          </Button>
-        </div>
-      </div>
+    <div className="flex h-screen bg-slate-950 overflow-hidden">
+      {/* Sidebar Navigation */}
+      <SidebarNav activeTab={activeTab} onTabChange={setActiveTab} />
 
-      <div className="flex gap-2 border-b border-border">
-        {(['overview', 'threats', 'analytics', 'scanners'] as const).map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 font-medium capitalize transition-colors flex items-center gap-2 ${
-              activeTab === tab ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {tab === 'scanners' && <QrCode className="w-4 h-4" />}
-            {tab}
-          </button>
-        ))}
-      </div>
-
-      {activeTab === 'overview' && (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card className="bg-card border-border">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Total Notifications</p>
-                    <p className="text-3xl font-bold text-foreground">{stats.total_notifications}</p>
-                  </div>
-                  <Activity className="w-10 h-10 text-primary" />
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-card border-border">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Flagged</p>
-                    <p className="text-3xl font-bold text-red-500">{stats.flagged_notifications}</p>
-                  </div>
-                  <AlertTriangle className="w-10 h-10 text-red-500" />
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-card border-border">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Benign</p>
-                    <p className="text-3xl font-bold text-green-500">{stats.benign_notifications}</p>
-                  </div>
-                  <CheckCircle className="w-10 h-10 text-green-500" />
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-card border-border">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Model Accuracy</p>
-                    <p className="text-3xl font-bold text-primary">{Math.round(stats.model_metrics.accuracy * 100)}%</p>
-                  </div>
-                  <TrendingUp className="w-10 h-10 text-primary" />
-                </div>
-              </CardContent>
-            </Card>
+      {/* Main Content */}
+      <main className="flex-1 overflow-y-auto bg-slate-950" style={{ width: '100%' }}>
+        <div className="space-y-2 w-full" style={{ width: '100%' }}>
+          {/* Header Section */}
+          <div className="flex items-center justify-between px-4 py-2 sticky top-0 bg-slate-950/95 z-10">
+            <div>
+              <h1 className="text-3xl font-bold bg-linear-to-r from-cyan-300 via-white to-cyan-200 bg-clip-text text-transparent">
+                ARGUS Command Center
+              </h1>
+              <p className="text-slate-400 mt-1">Enterprise Security Operations & ML Intelligence</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleExport('csv')}
+                className="border-slate-700 hover:border-cyan-500/50 hover:bg-cyan-500/10"
+              >
+                <Download className="w-4 h-4 mr-1" /> CSV
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleExport('json')}
+                className="border-slate-700 hover:border-cyan-500/50 hover:bg-cyan-500/10"
+              >
+                <Download className="w-4 h-4 mr-1" /> JSON
+              </Button>
+              <Button
+                onClick={handleRetrain}
+                disabled={retraining}
+                className="bg-linear-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-black font-semibold"
+              >
+                <RefreshCw className={`w-4 h-4 mr-2 ${retraining ? 'animate-spin' : ''}`} />
+                {retraining ? 'Retraining...' : 'Retrain Model'}
+              </Button>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
-              <Card className="bg-card border-border">
-                <CardHeader>
-                  <CardTitle className="text-foreground flex items-center gap-2">
-                    <Shield className="w-5 h-5 text-primary" />
-                    Model Metrics
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="bg-muted p-4 rounded-lg">
-                      <p className="text-sm text-muted-foreground">Precision</p>
-                      <p className="text-2xl font-bold text-foreground">{Math.round(stats.model_metrics.precision * 100)}%</p>
+          {/* Key Metrics - Only show on overview tab */}
+          {activeTab === 'overview' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2" style={{ width: '100%' }}>
+        {statCards.map((stat, index) => {
+          const colors = getColorClasses(stat.color);
+          return (
+            <PremiumCard key={index} className="group hover-glow" glowColor="cyan">
+              <PremiumCardContent className="pt-6">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className={`p-3 rounded-lg ${colors.bg} border ${colors.border}`}>
+                      <div className={colors.icon}>{stat.icon}</div>
                     </div>
-                    <div className="bg-muted p-4 rounded-lg">
-                      <p className="text-sm text-muted-foreground">Recall</p>
-                      <p className="text-2xl font-bold text-foreground">{Math.round(stats.model_metrics.recall * 100)}%</p>
-                    </div>
-                    <div className="bg-muted p-4 rounded-lg">
-                      <p className="text-sm text-muted-foreground">F1 Score</p>
-                      <p className="text-2xl font-bold text-foreground">{Math.round(stats.model_metrics.f1_score * 100)}%</p>
-                    </div>
-                    <div className="bg-muted p-4 rounded-lg">
-                      <p className="text-sm text-muted-foreground">Training Samples</p>
-                      <p className="text-2xl font-bold text-foreground">{stats.model_metrics.total_samples}</p>
-                    </div>
+                    {stat.trend && (
+                      <div className={`text-sm font-semibold ${stat.trend > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {stat.trend > 0 ? '↑' : '↓'} {Math.abs(stat.trend)}%
+                      </div>
+                    )}
                   </div>
-                </CardContent>
-              </Card>
+                  <div>
+                    <p className="text-slate-400 text-sm">{stat.title}</p>
+                    <p className="text-3xl font-bold text-white mt-1">{stat.value}</p>
+                    <p className="text-xs text-slate-500 mt-1">{stat.subtitle}</p>
+                  </div>
+                </div>
+              </PremiumCardContent>
+            </PremiumCard>
+          );
+        })}
+      </div>
+      )}
 
-              <Card className="bg-card border-border">
-                <CardHeader>
-                  <CardTitle className="text-foreground">Fraud Trend (Weekly)</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <LineChart data={trendData}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                      <XAxis dataKey="day" className="text-muted-foreground" />
-                      <YAxis className="text-muted-foreground" />
-                      <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }} />
-                      <Line type="monotone" dataKey="flagged" stroke="#ef4444" strokeWidth={2} dot={{ fill: '#ef4444' }} />
-                      <Line type="monotone" dataKey="total" stroke="#3b82f6" strokeWidth={2} dot={{ fill: '#3b82f6' }} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
+      {/* Notifications Feed - Only on overview */}
+      {activeTab === 'overview' && (
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 mb-2" style={{ width: '100%' }}>
+        <div className="lg:col-span-2">
+          <NotificationsFeed />
+        </div>
+        <div>
+          <AlertPanel maxAlerts={5} />
+        </div>
+      </div>
+      )}
+      {/* Tab Content */}
+      {activeTab === 'overview' && (
+        <div className="space-y-2" style={{ width: '100%' }}>
+          {/* Model Metrics */}
+          <PremiumCard>
+            <PremiumCardHeader>
+              <PremiumCardTitle className="flex items-center gap-2">
+                <Shield className="w-5 h-5 text-cyan-400" />
+                Model Performance Metrics
+              </PremiumCardTitle>
+            </PremiumCardHeader>
+            <PremiumCardContent>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                  { label: 'Precision', value: Math.round(stats.model_metrics.precision * 100), color: 'cyan' },
+                  { label: 'Recall', value: Math.round(stats.model_metrics.recall * 100), color: 'orange' },
+                  { label: 'F1 Score', value: Math.round(stats.model_metrics.f1_score * 100), color: 'blue' },
+                  { label: 'Samples', value: stats.model_metrics.total_samples, color: 'purple' },
+                ].map((metric, idx) => {
+                  const colors = getColorClasses(metric.color);
+                  return (
+                    <div key={idx} className={`p-4 rounded-lg border ${colors.bg} ${colors.border}`}>
+                      <p className="text-sm text-slate-400 mb-2">{metric.label}</p>
+                      <p className={`text-2xl font-bold ${colors.text}`}>{metric.value}{metric.label !== 'Samples' ? '%' : ''}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </PremiumCardContent>
+          </PremiumCard>
 
-              <Card className="bg-card border-border">
-                <CardHeader>
-                  <CardTitle className="text-foreground">Department Statistics</CardTitle>
-                </CardHeader>
-                <CardContent>
+          {/* Charts Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-2" style={{ width: '100%' }}>
+            <div className="lg:col-span-2 space-y-2">
+              {/* Trend Chart */}
+              <PremiumCard>
+                <PremiumCardHeader>
+                  <PremiumCardTitle>Fraud Detection Trends</PremiumCardTitle>
+                </PremiumCardHeader>
+                <PremiumCardContent>
                   <ResponsiveContainer width="100%" height={250}>
+                    <AreaChart data={trendData}>
+                      <defs>
+                        <linearGradient id="colorFlagged" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#ef4444" stopOpacity={0.8}/>
+                          <stop offset="95%" stopColor="#ef4444" stopOpacity={0.1}/>
+                        </linearGradient>
+                        <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.8}/>
+                          <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.1}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,116,139,0.1)" />
+                      <XAxis dataKey="day" stroke="#64748b" />
+                      <YAxis stroke="#64748b" />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'rgba(15, 23, 41, 0.8)',
+                          border: '1px solid rgba(0, 212, 255, 0.2)',
+                          borderRadius: '8px',
+                        }}
+                        labelStyle={{ color: '#f1f5f9' }}
+                      />
+                      <Area type="monotone" dataKey="flagged" stroke="#ef4444" strokeWidth={2} fillOpacity={1} fill="url(#colorFlagged)" name="Flagged" />
+                      <Area type="monotone" dataKey="total" stroke="#06b6d4" strokeWidth={2} fillOpacity={1} fill="url(#colorTotal)" name="Total" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </PremiumCardContent>
+              </PremiumCard>
+
+              {/* Department Statistics */}
+              <PremiumCard>
+                <PremiumCardHeader>
+                  <PremiumCardTitle>Department Risk Analysis</PremiumCardTitle>
+                </PremiumCardHeader>
+                <PremiumCardContent>
+                  <ResponsiveContainer width="100%" height={280}>
                     <BarChart data={deptData}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                      <XAxis dataKey="department" className="text-muted-foreground" />
-                      <YAxis className="text-muted-foreground" />
-                      <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,116,139,0.1)" />
+                      <XAxis dataKey="department" stroke="#64748b" />
+                      <YAxis stroke="#64748b" />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'rgba(15, 23, 41, 0.8)',
+                          border: '1px solid rgba(0, 212, 255, 0.2)',
+                          borderRadius: '8px',
+                        }}
+                        labelStyle={{ color: '#f1f5f9' }}
+                      />
                       <Bar dataKey="total" fill="#3b82f6" name="Total" radius={[4, 4, 0, 0]} />
                       <Bar dataKey="flagged" fill="#ef4444" name="Flagged" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
-                </CardContent>
-              </Card>
+                </PremiumCardContent>
+              </PremiumCard>
             </div>
 
-            <div className="space-y-6">
-              <AlertPanel maxAlerts={4} />
-              
-              <Card className="bg-card border-border">
-                <CardHeader>
-                  <CardTitle className="text-foreground">Detection Distribution</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={180}>
+            {/* Distribution Pie Chart */}
+            <div className="space-y-2">
+              <PremiumCard>
+                <PremiumCardHeader>
+                  <PremiumCardTitle>Detection Distribution</PremiumCardTitle>
+                </PremiumCardHeader>
+                <PremiumCardContent>
+                  <ResponsiveContainer width="100%" height={220}>
                     <PieChart>
-                      <Pie data={pieData} cx="50%" cy="50%" innerRadius={50} outerRadius={70} paddingAngle={5} dataKey="value">
+                      <Pie
+                        data={pieData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={70}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
                         {pieData.map((_, index) => (
                           <Cell key={`cell-${index}`} fill={index === 0 ? '#ef4444' : '#22c55e'} />
                         ))}
                       </Pie>
-                      <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'rgba(15, 23, 41, 0.8)',
+                          border: '1px solid rgba(0, 212, 255, 0.2)',
+                          borderRadius: '8px',
+                        }}
+                        labelStyle={{ color: '#f1f5f9' }}
+                      />
                     </PieChart>
                   </ResponsiveContainer>
-                  <div className="flex justify-center gap-6">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full bg-red-500" />
-                      <span className="text-sm text-muted-foreground">Flagged</span>
+                  <div className="flex flex-col gap-3 mt-4">
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full bg-red-500" />
+                        <span className="text-sm text-slate-300">Flagged</span>
+                      </div>
+                      <span className="text-sm font-semibold text-red-400">{stats.flagged_notifications}</span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full bg-green-500" />
-                      <span className="text-sm text-muted-foreground">Benign</span>
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full bg-green-500" />
+                        <span className="text-sm text-slate-300">Benign</span>
+                      </div>
+                      <span className="text-sm font-semibold text-green-400">{stats.benign_notifications}</span>
                     </div>
                   </div>
-                </CardContent>
-              </Card>
+                </PremiumCardContent>
+              </PremiumCard>
             </div>
           </div>
-        </>
+        </div>
       )}
 
+      {/* Tab Content - Additional tabs */}
       {activeTab === 'threats' && <ThreatPatterns />}
       {activeTab === 'analytics' && <AnalyticsPanel />}
       {activeTab === 'scanners' && <ScannerTools />}
+      {activeTab === 'permissions' && <AdminRolesPanel />}
+        </div>
+      </main>
     </div>
   );
 }

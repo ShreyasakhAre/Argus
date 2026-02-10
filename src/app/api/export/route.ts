@@ -7,6 +7,6 @@ export async function GET(request: NextRequest) {
   const org_id = searchParams.get('org_id') || undefined;
   const flagged_only = searchParams.get('flagged_only') === 'true';
   
-  const data = mockData.exportReport(format, { org_id, flagged_only });
+  const data = await mockData.exportReport(format, { org_id, flagged_only });
   return NextResponse.json(data);
 }

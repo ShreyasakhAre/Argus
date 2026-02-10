@@ -104,7 +104,7 @@ export default function LoginPage() {
           </div>
           <div className="text-center">
             <h1 className="text-3xl font-bold text-foreground tracking-tight">ARGUS</h1>
-            <p className="text-muted-foreground">Fraud Detection System</p>
+            <p className="text-muted-foreground">Centralized Notification Dashboard</p>
           </div>
         </div>
 

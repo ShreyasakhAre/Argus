@@ -1,15 +1,11 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { Role, User as BaseUser, ROLE_NAMES } from '@/lib/types';
 
-export type Role = 'admin' | 'analyst' | 'department_head' | 'employee' | 'auditor';
+export type { Role } from '@/lib/types';
 
-export interface User {
-  email: string;
-  role: Role;
-  orgId: string;
-  name: string;
-}
+export interface User extends BaseUser {}
 
 interface AuthContextType {
   user: User | null;
@@ -51,13 +47,7 @@ function decodeJWT(token: string): User | null {
   }
 }
 
-const roleNames: Record<Role, string> = {
-  admin: 'Administrator',
-  analyst: 'Fraud Analyst',
-  department_head: 'Department Head',
-  employee: 'Employee',
-  auditor: 'Auditor',
-};
+const roleNames: Record<Role, string> = ROLE_NAMES;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);

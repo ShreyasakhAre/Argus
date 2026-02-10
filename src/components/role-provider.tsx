@@ -1,9 +1,10 @@
 'use client';
 
 import { createContext, useContext, ReactNode } from 'react';
-import { useAuth, Role } from './auth-provider';
+import { useAuth } from './auth-provider';
+import { Role } from '@/lib/types';
 
-export type { Role } from './auth-provider';
+export type { Role } from '@/lib/types';
 
 interface RoleContextType {
   role: Role;

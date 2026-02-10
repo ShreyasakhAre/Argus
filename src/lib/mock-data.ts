@@ -1,9 +1,10 @@
 import type { Notification, Stats, HeatmapData, Explanation, Feedback, SourceApp } from './ml-service';
 import { scanTextForLinks } from './link-scanner';
+import { generateLargeNotificationDataset } from './notifications-large';
 
 const SOURCE_APPS: SourceApp[] = ['Email', 'Slack', 'Microsoft Teams', 'HR Portal', 'Finance System', 'Internal Mobile App'];
 
-const notifications: Notification[] = [
+const notifications: Notification[] = generateLargeNotificationDataset([
   { notification_id: 'N001', org_id: 'ORG001', department: 'Finance', sender: 'john.doe@company.com', receiver: 'jane.smith@company.com', content: 'Please review the quarterly budget report attached. Access it at https://drive.google.com/finance-report-q4', timestamp: '2024-01-15 09:30:00', risk_score: 0.12, risk_level: 'Low', is_flagged: false, source_app: 'Email' },
   { notification_id: 'N002', org_id: 'ORG001', department: 'Finance', sender: 'unknown.sender@external.com', receiver: 'finance.team@company.com', content: 'URGENT: Wire transfer needed immediately to account 12345678. Verify at http://192.168.1.100/secure-login/verify-account', timestamp: '2024-01-15 10:15:00', risk_score: 0.92, risk_level: 'High', is_flagged: true, source_app: 'Email' },
   { notification_id: 'N003', org_id: 'ORG001', department: 'IT', sender: 'admin@company.com', receiver: 'all.employees@company.com', content: 'System maintenance scheduled for this weekend. Details at https://intranet.company.com/maintenance', timestamp: '2024-01-15 11:00:00', risk_score: 0.08, risk_level: 'Low', is_flagged: false, source_app: 'Slack' },
@@ -29,9 +30,24 @@ const notifications: Notification[] = [
   { notification_id: 'N023', org_id: 'ORG002', department: 'HR', sender: 'recruiter@company.com', receiver: 'candidates@external.com', content: 'Thank you for applying we will review your application. Track status at https://careers.company.com/applications', timestamp: '2024-01-17 10:00:00', risk_score: 0.08, risk_level: 'Low', is_flagged: false, source_app: 'HR Portal' },
   { notification_id: 'N024', org_id: 'ORG001', department: 'Executive', sender: 'impostor.board@scam.net', receiver: 'ceo@company.com', content: 'Emergency board vote required transfer authorization needed immediately. Vote at http://board-vote-secure.pw/emergency-authorization', timestamp: '2024-01-17 11:00:00', risk_score: 0.96, risk_level: 'High', is_flagged: true, source_app: 'Microsoft Teams' },
   { notification_id: 'N025', org_id: 'ORG002', department: 'Sales', sender: 'partner@distributor.com', receiver: 'sales.director@company.com', content: 'Partnership renewal contract ready for signature. View at https://www.distributor.com/contracts/partnership-2024', timestamp: '2024-01-17 14:00:00', risk_score: 0.11, risk_level: 'Low', is_flagged: false, source_app: 'Email' },
-];
+]);
 
 const feedbackStore: Feedback[] = [];
+
+// ── Bell-compatible read tracking ──
+const readNotificationIds = new Set<string>();
+
+/** Transform an ML-service notification into the shape the bell & feed expect */
+function toBellNotification(n: Notification) {
+  return {
+    ...n,
+    _id: n.notification_id,
+    title: `${n.risk_level} Risk: ${n.source_app} from ${n.sender.split('@')[0]}`,
+    message: n.content,
+    severity: n.risk_level === 'High' ? 'critical' : n.risk_level === 'Medium' ? 'high' : 'medium',
+    read: readNotificationIds.has(n.notification_id),
+  };
+}
 
 export interface ThreatPattern {
   id: string;
@@ -182,11 +198,49 @@ const timelineEvents: TimelineEvent[] = [
   { id: 'E009', notification_id: 'N021', event_type: 'detected', timestamp: '2024-01-17 08:30:00', details: 'Ransomware threat detected - Critical severity' },
   { id: 'E010', notification_id: 'N024', event_type: 'detected', timestamp: '2024-01-17 11:00:00', details: 'Executive impersonation detected' },
 ];
-
+   
+// export const mockData = {
+//   getNotifications: (params?: { 
+//     org_id?: string; 
+//     department?: string; 
+//     flagged_only?: boolean;
+//     search?: string;
+//     risk_level?: string;
+//     date_from?: string;
+//     date_to?: string;
+//     sender_domain?: string;
+//     source_app?: string;
+//   }): { notifications: Notification[]; total: number } => {
+//     let filtered = [...notifications];
+//     if (params?.org_id) filtered = filtered.filter(n => n.org_id === params.org_id);
+//     if (params?.department) filtered = filtered.filter(n => n.department === params.department);
+//     if (params?.flagged_only) filtered = filtered.filter(n => n.is_flagged);
+//     if (params?.risk_level) filtered = filtered.filter(n => n.risk_level === params.risk_level);
+//     if (params?.source_app) filtered = filtered.filter(n => n.source_app === params.source_app);
+//     if (params?.search) {
+//       const searchLower = params.search.toLowerCase();
+//       filtered = filtered.filter(n => 
+//         n.content.toLowerCase().includes(searchLower) ||
+//         n.sender.toLowerCase().includes(searchLower) ||
+//         n.receiver.toLowerCase().includes(searchLower) ||
+//         n.notification_id.toLowerCase().includes(searchLower)
+//       );
+//     }
+//     if (params?.sender_domain) {
+//       filtered = filtered.filter(n => n.sender.includes(params.sender_domain));
+//     }
+//     if (params?.date_from) {
+//       filtered = filtered.filter(n => n.timestamp >= params.date_from!);
+//     }
+//     if (params?.date_to) {
+//       filtered = filtered.filter(n => n.timestamp <= params.date_to!);
+//     }
+//     return { notifications: filtered, total: filtered.length };
+//   },
 export const mockData = {
-  getNotifications: (params?: { 
-    org_id?: string; 
-    department?: string; 
+  getNotifications: (params?: {
+    org_id?: string;
+    department?: string;
     flagged_only?: boolean;
     search?: string;
     risk_level?: string;
@@ -195,23 +249,26 @@ export const mockData = {
     sender_domain?: string;
     source_app?: string;
   }): { notifications: Notification[]; total: number } => {
+
     let filtered = [...notifications];
+
     if (params?.org_id) filtered = filtered.filter(n => n.org_id === params.org_id);
     if (params?.department) filtered = filtered.filter(n => n.department === params.department);
     if (params?.flagged_only) filtered = filtered.filter(n => n.is_flagged);
     if (params?.risk_level) filtered = filtered.filter(n => n.risk_level === params.risk_level);
     if (params?.source_app) filtered = filtered.filter(n => n.source_app === params.source_app);
+
     if (params?.search) {
-      const searchLower = params.search.toLowerCase();
-      filtered = filtered.filter(n => 
-        n.content.toLowerCase().includes(searchLower) ||
-        n.sender.toLowerCase().includes(searchLower) ||
-        n.receiver.toLowerCase().includes(searchLower) ||
-        n.notification_id.toLowerCase().includes(searchLower)
+      const s = params.search.toLowerCase();
+      filtered = filtered.filter(n =>
+        n.content.toLowerCase().includes(s) ||
+        n.sender.toLowerCase().includes(s) ||
+        n.receiver.toLowerCase().includes(s)
       );
     }
+
     if (params?.sender_domain) {
-      filtered = filtered.filter(n => n.sender.includes(params.sender_domain));
+      filtered = filtered.filter(n => n.sender.includes(params.sender_domain!));
     }
     if (params?.date_from) {
       filtered = filtered.filter(n => n.timestamp >= params.date_from!);
@@ -219,58 +276,27 @@ export const mockData = {
     if (params?.date_to) {
       filtered = filtered.filter(n => n.timestamp <= params.date_to!);
     }
-    return { notifications: filtered, total: filtered.length };
+
+    return { notifications: filtered.map(toBellNotification), total: filtered.length };
+  },
+
+  /** Mark a notification as read by _id (which equals notification_id) */
+  markAsRead: (id: string): boolean => {
+    const exists = notifications.some(n => n.notification_id === id);
+    if (exists) {
+      readNotificationIds.add(id);
+      return true;
+    }
+    return false;
+  },
+
+  /** Get the count of unread notifications */
+  getUnreadCount: (): number => {
+    return notifications.filter(n => !readNotificationIds.has(n.notification_id)).length;
   },
 
   getSourceApps: (): { source_apps: SourceApp[] } => {
     return { source_apps: SOURCE_APPS };
-  },
-
-  getStats: (): Stats => {
-    const flagged = notifications.filter(n => n.is_flagged).length;
-    const deptStats: Record<string, { total: number; flagged: number; avg_risk: number; scores: number[] }> = {};
-    
-    notifications.forEach(n => {
-      if (!deptStats[n.department]) {
-        deptStats[n.department] = { total: 0, flagged: 0, avg_risk: 0, scores: [] };
-      }
-      deptStats[n.department].total++;
-      deptStats[n.department].scores.push(n.risk_score);
-      if (n.is_flagged) deptStats[n.department].flagged++;
-    });
-
-    const department_stats: Stats['department_stats'] = {};
-    Object.entries(deptStats).forEach(([dept, data]) => {
-      department_stats[dept] = {
-        total: data.total,
-        flagged: data.flagged,
-        avg_risk: data.scores.reduce((a, b) => a + b, 0) / data.scores.length
-      };
-    });
-
-    return {
-      total_notifications: notifications.length,
-      flagged_notifications: flagged,
-      benign_notifications: notifications.length - flagged,
-      model_metrics: {
-        accuracy: 0.95,
-        precision: 0.92,
-        recall: 0.88,
-        f1_score: 0.90,
-        total_samples: 100,
-        malicious_samples: 22,
-        benign_samples: 78
-      },
-      department_stats,
-      feature_importance: {
-        has_urgent: 0.25,
-        has_money_keywords: 0.22,
-        is_external_sender: 0.18,
-        has_action_keywords: 0.15,
-        has_threat_keywords: 0.12,
-        content_length: 0.08
-      }
-    };
   },
 
   getHeatmap: (org_id?: string): { heatmap: HeatmapData } => {
@@ -481,6 +507,48 @@ export const mockData = {
       filename: `argus_report_${new Date().toISOString().split('T')[0]}.json`,
       content: JSON.stringify(data, null, 2),
       records: data.notifications.length
+    };
+  },
+
+  getStats: (): Stats => {
+    const allNotifications = notifications;
+    const flagged = allNotifications.filter(n => n.is_flagged);
+    const benign = allNotifications.filter(n => !n.is_flagged);
+
+    const departmentStats: Record<string, { total: number; flagged: number; avg_risk: number }> = {};
+    allNotifications.forEach(n => {
+      if (!departmentStats[n.department]) {
+        departmentStats[n.department] = { total: 0, flagged: 0, avg_risk: 0 };
+      }
+      departmentStats[n.department].total++;
+      if (n.is_flagged) departmentStats[n.department].flagged++;
+      departmentStats[n.department].avg_risk += n.risk_score;
+    });
+    Object.keys(departmentStats).forEach(dept => {
+      departmentStats[dept].avg_risk /= departmentStats[dept].total;
+    });
+
+    return {
+      total_notifications: allNotifications.length,
+      flagged_notifications: flagged.length,
+      benign_notifications: benign.length,
+      model_metrics: {
+        accuracy: 0.95,
+        precision: 0.92,
+        recall: 0.88,
+        f1_score: 0.90,
+        total_samples: allNotifications.length,
+        malicious_samples: flagged.length,
+        benign_samples: benign.length,
+      },
+      department_stats: departmentStats,
+      feature_importance: {
+        has_urgent: 0.35,
+        is_external_sender: 0.28,
+        has_money_keywords: 0.22,
+        malicious_link_detected: 0.45,
+        sender_reputation: 0.18,
+      },
     };
   }
 };
