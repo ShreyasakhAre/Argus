@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'better-auth/next-js';
+import { auth } from 'better-auth/next-js';
 import { canUserPerform, isAdmin } from '@/lib/permissions';
 import { User, PermissionType } from '@/lib/types';
 import { logAuditEvent } from '@/lib/audit-logger';
@@ -14,7 +14,9 @@ import { logAuditEvent } from '@/lib/audit-logger';
  */
 export async function getUserFromRequest(request: NextRequest): Promise<User | null> {
   try {
-    const session = await getServerSession();
+    const session = await auth.api.getSession({
+      headers: request.headers
+    });
     return session?.user as User | null;
   } catch (error) {
     console.error('Error getting session:', error);

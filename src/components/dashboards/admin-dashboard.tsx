@@ -20,6 +20,7 @@ import { SidebarNav } from '@/components/dashboards/sidebar-nav';
 import { PremiumCard, PremiumCardHeader, PremiumCardTitle, PremiumCardContent, PremiumCardFooter } from '@/components/ui/premium-card';
 import type { Stats } from '@/lib/ml-service';
 import NotificationsFeed from "@/components/notifications-feed";
+import { calculateThreatVelocity } from '@/lib/threat-velocity';
 
 const COLORS = ['#ef4444', '#f97316', '#eab308', '#06b6d4', '#3b82f6', '#8b5cf6'];
 
@@ -29,18 +30,23 @@ interface StatCard {
   subtitle?: string;
   icon: React.ReactNode;
   trend?: number;
-  color: 'red' | 'orange' | 'yellow' | 'cyan' | 'blue' | 'purple';
+  color: 'red' | 'orange' | 'yellow' | 'cyan' | 'blue' | 'purple' | 'green';
 }
 
 export function AdminDashboard() {
   const { orgId } = useRole();
   const [stats, setStats] = useState<Stats | null>(null);
+  const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [retraining, setRetraining] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'threats' | 'analytics' | 'scanners' | 'permissions'>('overview');
+  
+  // Check if sidebar is already rendered by global layout
+  const isStandalone = false; // Admin dashboard uses global layout, so no internal sidebar
 
   useEffect(() => {
     fetchStats();
+    fetchNotifications();
   }, [orgId]);
 
   const fetchStats = async () => {
@@ -54,6 +60,18 @@ export function AdminDashboard() {
       console.error('Failed to load stats:', e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchNotifications = async () => {
+    try {
+      const res = await fetch(`/api/notifications?org_id=${orgId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setNotifications(data?.notifications || []);
+      }
+    } catch (e) {
+      console.error('Failed to load notifications:', e);
     }
   };
 
@@ -84,17 +102,36 @@ export function AdminDashboard() {
     );
   }
 
+  const safeStats = stats ?? {
+  department_stats: {},
+  total_notifications: 0,
+  flagged_notifications: 0,
+  benign_notifications: 0,
+  model_metrics: {
+    accuracy: 0,
+    precision: 0,
+    recall: 0,
+    f1_score: 0,
+    total_samples: 0
+  }
+};
+
+  // Calculate threat velocity
+  const threatVelocity = calculateThreatVelocity(notifications);
+
   const pieData = [
-    { name: 'Flagged', value: stats.flagged_notifications },
-    { name: 'Benign', value: stats.benign_notifications },
+    { name: 'Flagged', value: safeStats.flagged_notifications || 0 },
+    { name: 'Benign', value: safeStats.benign_notifications || 0 },
   ];
 
-  const deptData = Object.entries(stats.department_stats).map(([dept, data]) => ({
-    department: dept,
-    total: data.total,
-    flagged: data.flagged,
-    risk: Math.round(data.avg_risk * 100),
-  }));
+  const deptData = safeStats.department_stats && typeof safeStats.department_stats === 'object' 
+    ? Object.entries(safeStats.department_stats).map(([dept, data]) => ({
+        department: dept,
+        total: data?.total || 0,
+        flagged: data?.flagged || 0,
+        risk: Math.round((data?.avg_risk || 0) * 100),
+      }))
+    : [];
 
   const trendData = [
     { day: 'Mon', flagged: 3, total: 15, risk: 20 },
@@ -107,7 +144,7 @@ export function AdminDashboard() {
   const statCards: StatCard[] = [
     {
       title: 'Total Notifications',
-      value: stats.total_notifications,
+      value: stats?.total_notifications || 0,
       subtitle: 'All time',
       icon: <Activity className="w-6 h-6" />,
       trend: 12,
@@ -115,7 +152,7 @@ export function AdminDashboard() {
     },
     {
       title: 'Flagged Alerts',
-      value: stats.flagged_notifications,
+      value: stats?.flagged_notifications || 0,
       subtitle: 'Requires action',
       icon: <AlertTriangle className="w-6 h-6" />,
       trend: -5,
@@ -123,15 +160,15 @@ export function AdminDashboard() {
     },
     {
       title: 'Benign',
-      value: stats.benign_notifications,
+      value: stats?.benign_notifications || 0,
       subtitle: 'Cleared',
       icon: <CheckCircle className="w-6 h-6" />,
       trend: 8,
-      color: 'blue',
+      color: 'green',
     },
     {
       title: 'Model Accuracy',
-      value: `${Math.round(stats.model_metrics.accuracy * 100)}%`,
+      value: `${Math.round((stats?.model_metrics?.accuracy || 0) * 100)}%`,
       subtitle: 'Performance',
       icon: <TrendingUp className="w-6 h-6" />,
       color: 'blue',
@@ -152,48 +189,108 @@ export function AdminDashboard() {
   };
 
   return (
-    <div className="flex h-screen bg-slate-950 overflow-hidden">
-      {/* Sidebar Navigation */}
-      <SidebarNav activeTab={activeTab} onTabChange={setActiveTab} />
-
-      {/* Main Content */}
-      <main className="flex-1 overflow-y-auto bg-slate-950" style={{ width: '100%' }}>
-        <div className="space-y-2 w-full" style={{ width: '100%' }}>
-          {/* Header Section */}
-          <div className="flex items-center justify-between px-4 py-2 sticky top-0 bg-slate-950/95 z-10">
-            <div>
-              <h1 className="text-3xl font-bold bg-linear-to-r from-cyan-300 via-white to-cyan-200 bg-clip-text text-transparent">
-                ARGUS Command Center
-              </h1>
-              <p className="text-slate-400 mt-1">Enterprise Security Operations & ML Intelligence</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleExport('csv')}
-                className="border-slate-700 hover:border-cyan-500/50 hover:bg-cyan-500/10"
-              >
-                <Download className="w-4 h-4 mr-1" /> CSV
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleExport('json')}
-                className="border-slate-700 hover:border-cyan-500/50 hover:bg-cyan-500/10"
-              >
-                <Download className="w-4 h-4 mr-1" /> JSON
-              </Button>
-              <Button
-                onClick={handleRetrain}
-                disabled={retraining}
-                className="bg-linear-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-black font-semibold"
-              >
-                <RefreshCw className={`w-4 h-4 mr-2 ${retraining ? 'animate-spin' : ''}`} />
-                {retraining ? 'Retraining...' : 'Retrain Model'}
-              </Button>
+    <div className="flex-1 overflow-y-auto bg-slate-950" style={{ width: '100%' }}>
+      <div className="space-y-2 w-full" style={{ width: '100%' }}>
+          {/* Header */}
+          <div className="border-b border-slate-800 bg-slate-900/50 backdrop-blur-sm sticky top-0 z-10">
+            <div className="px-6 py-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-2xl font-bold text-white">Admin Dashboard</h1>
+                  <p className="text-slate-400">System overview and management</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => window.location.reload()}
+                    className="border-slate-700 text-slate-300 hover:bg-slate-800"
+                  >
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Refresh
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
+
+          {/* Tab Navigation */}
+          <div className="border-b border-slate-800 bg-slate-900/30">
+            <div className="px-6">
+              <div className="flex gap-6">
+            {[
+              { id: 'overview', label: 'Overview' },
+              { id: 'threats', label: 'Threat Intelligence' },
+              { id: 'analytics', label: 'Analytics' },
+              { id: 'scanners', label: 'Scanners' },
+              { id: 'permissions', label: 'Roles & Permissions' },
+            ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id as any)}
+                    className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+                      activeTab === tab.id
+                        ? 'border-cyan-500 text-cyan-400'
+                        : 'border-transparent text-slate-400 hover:text-slate-300'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Threat Velocity Indicator - Only show on overview tab */}
+          {activeTab === 'overview' && (
+            <div className={`px-4 py-3 rounded-lg border ${
+              threatVelocity.isSpike 
+                ? 'bg-red-500/10 border-red-500/30' 
+                : threatVelocity.percentageChange < 0 
+                  ? 'bg-green-500/10 border-green-500/30'
+                  : 'bg-blue-500/10 border-blue-500/30'
+            }`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`w-3 h-3 rounded-full ${
+                    threatVelocity.isSpike 
+                      ? 'bg-red-500 animate-pulse' 
+                      : threatVelocity.percentageChange < 0 
+                        ? 'bg-green-500'
+                        : 'bg-blue-500'
+                  }`} />
+                  <div>
+                    <p className={`text-sm font-medium ${
+                      threatVelocity.isSpike 
+                        ? 'text-red-400' 
+                        : threatVelocity.percentageChange < 0 
+                          ? 'text-green-400'
+                          : 'text-blue-400'
+                    }`}>
+                      {threatVelocity.displayText}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      High-risk alerts: {threatVelocity.current24h} (24h) vs {threatVelocity.previous24h} (prev 24h)
+                    </p>
+                  </div>
+                </div>
+                <div className={`flex items-center gap-1 text-sm ${
+                  threatVelocity.isSpike 
+                    ? 'text-red-400' 
+                    : threatVelocity.percentageChange < 0 
+                      ? 'text-green-400'
+                      : 'text-blue-400'
+                }`}>
+                  {threatVelocity.percentageChange > 0 ? (
+                    <TrendingUp className="w-4 h-4" />
+                  ) : (
+                    <TrendingUp className="w-4 h-4 rotate-180" />
+                  )}
+                  {Math.abs(threatVelocity.percentageChange).toFixed(1)}%
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Key Metrics - Only show on overview tab */}
           {activeTab === 'overview' && (
@@ -252,10 +349,10 @@ export function AdminDashboard() {
             <PremiumCardContent>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
-                  { label: 'Precision', value: Math.round(stats.model_metrics.precision * 100), color: 'cyan' },
-                  { label: 'Recall', value: Math.round(stats.model_metrics.recall * 100), color: 'orange' },
-                  { label: 'F1 Score', value: Math.round(stats.model_metrics.f1_score * 100), color: 'blue' },
-                  { label: 'Samples', value: stats.model_metrics.total_samples, color: 'purple' },
+                  { label: 'Precision', value: Math.round((stats?.model_metrics?.precision || 0) * 100), color: 'cyan' },
+                  { label: 'Recall', value: Math.round((stats?.model_metrics?.recall || 0) * 100), color: 'orange' },
+                  { label: 'F1 Score', value: Math.round((stats?.model_metrics?.f1_score || 0) * 100), color: 'blue' },
+                  { label: 'Samples', value: stats?.model_metrics?.total_samples || 0, color: 'purple' },
                 ].map((metric, idx) => {
                   const colors = getColorClasses(metric.color);
                   return (
@@ -373,14 +470,14 @@ export function AdminDashboard() {
                         <div className="w-3 h-3 rounded-full bg-red-500" />
                         <span className="text-sm text-slate-300">Flagged</span>
                       </div>
-                      <span className="text-sm font-semibold text-red-400">{stats.flagged_notifications}</span>
+                      <span className="text-sm font-semibold text-red-400">{stats?.flagged_notifications || 0}</span>
                     </div>
                     <div className="flex items-center justify-between p-3 rounded-lg bg-green-500/10 border border-green-500/20">
                       <div className="flex items-center gap-2">
                         <div className="w-3 h-3 rounded-full bg-green-500" />
                         <span className="text-sm text-slate-300">Benign</span>
                       </div>
-                      <span className="text-sm font-semibold text-green-400">{stats.benign_notifications}</span>
+                      <span className="text-sm font-semibold text-green-400">{stats?.benign_notifications || 0}</span>
                     </div>
                   </div>
                 </PremiumCardContent>
@@ -395,8 +492,7 @@ export function AdminDashboard() {
       {activeTab === 'analytics' && <AnalyticsPanel />}
       {activeTab === 'scanners' && <ScannerTools />}
       {activeTab === 'permissions' && <AdminRolesPanel />}
-        </div>
-      </main>
+      </div>
     </div>
   );
 }

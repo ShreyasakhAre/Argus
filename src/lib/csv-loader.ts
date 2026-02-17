@@ -50,7 +50,13 @@ export async function loadNotificationsFromCSV(): Promise<Notification[]> {
     const isMalicious = row.is_malicious === '1' || row.is_malicious === 'true';
     // Derive risk fields from is_malicious
     const riskScore = isMalicious ? 0.75 + Math.random() * 0.24 : Math.random() * 0.3;
-    const riskLevel = riskScore >= 0.7 ? 'High' : riskScore >= 0.4 ? 'Medium' : 'Low';
+    const riskLevel: 'Low' | 'Medium' | 'High' = riskScore >= 0.7 ? 'High' : riskScore >= 0.4 ? 'Medium' : 'Low';
+    
+    // Validate and cast risk_level from CSV
+    const csvRiskLevel = row.risk_level;
+    const validRiskLevel: 'Low' | 'Medium' | 'High' = (csvRiskLevel === 'High' || csvRiskLevel === 'Medium' || csvRiskLevel === 'Low') 
+      ? (csvRiskLevel as 'Low' | 'Medium' | 'High')
+      : riskLevel;
 
     results.push({
       notification_id: row.notification_id || `N${String(i).padStart(3, '0')}`,
@@ -61,7 +67,7 @@ export async function loadNotificationsFromCSV(): Promise<Notification[]> {
       content: row.content || '',
       timestamp: row.timestamp || '',
       risk_score: row.risk_score ? Number(row.risk_score) : riskScore,
-      risk_level: row.risk_level || riskLevel,
+      risk_level: validRiskLevel,
       is_flagged: row.is_flagged !== undefined ? (row.is_flagged === 'true') : isMalicious,
       source_app: (row.source_app as SourceApp) || SOURCE_APPS[i % SOURCE_APPS.length],
     });

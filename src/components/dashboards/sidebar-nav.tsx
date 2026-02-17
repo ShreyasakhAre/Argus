@@ -1,9 +1,8 @@
 'use client';
 
 import { ReactNode } from 'react';
-import {
-  Activity, Target, Zap, QrCode, Shield
-} from 'lucide-react';
+import { Activity, Target, Zap, QrCode, Shield } from 'lucide-react';
+import { ProfileSection } from '@/components/common/profile-section';
 
 interface NavTab {
   id: string;
@@ -70,7 +69,7 @@ export function SidebarNav({ activeTab, onTabChange }: SidebarNavProps) {
 
       {/* Footer */}
       <div className="p-4 border-t border-slate-800/30 bg-slate-900/30">
-        <p className="text-xs text-slate-500 text-center">v1.0.0</p>
+        <ProfileSection />
       </div>
     </aside>
   );

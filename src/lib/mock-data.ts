@@ -492,7 +492,7 @@ export const mockData = {
     if (format === 'csv') {
       const headers = ['notification_id', 'org_id', 'department', 'sender', 'receiver', 'content', 'timestamp', 'risk_score', 'risk_level', 'is_flagged'];
       const rows = data.notifications.map(n => 
-        headers.map(h => JSON.stringify((n as Record<string, unknown>)[h])).join(',')
+        headers.map(h => JSON.stringify((n as unknown as Record<string, unknown>)[h])).join(',')
       );
       return {
         format: 'csv',

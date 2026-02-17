@@ -123,9 +123,10 @@ export default function NotificationsFeed() {
     setSelectedIds(new Set());
   }, []);
 
-  const notSafeCount = notifications.filter(isNotSafe).length;
-  const allNotSafeSelected = notSafeCount > 0 && selectedIds.size === notSafeCount;
-  const someSelected = selectedIds.size > 0;
+  const notSafeIds = notifications.filter(isNotSafe).map((n) => n._id);
+    const notSafeCount = notSafeIds.length;
+    const allNotSafeSelected = notSafeCount > 0 && notSafeIds.every((id) => selectedIds.has(id));
+    const someSelected = selectedIds.size > 0;
 
   // Bulk action handler (UI-only, no API calls)
   const handleBulkAction = useCallback((action: string) => {
@@ -170,8 +171,16 @@ export default function NotificationsFeed() {
           is_flagged: n.is_flagged,
         }));
       
-      setNotifications(notifs);
-      updateUnreadCount(notifs);
+        setNotifications(notifs);
+        updateUnreadCount(notifs);
+        // Clear stale selections that no longer match loaded notifications
+        setSelectedIds((prev) => {
+          if (prev.size === 0) return prev;
+          const validIds = new Set(notifs.map((n: Notification) => n._id));
+          const next = new Set<string>();
+          prev.forEach((id) => { if (validIds.has(id)) next.add(id); });
+          return next.size === prev.size ? prev : next;
+        });
     } catch (err) {
       console.error("Failed to load notifications:", err);
     } finally {
@@ -188,16 +197,12 @@ export default function NotificationsFeed() {
         body: JSON.stringify({ id }),
       });
       setNotifications((prev) => {
-        const updated = prev.map((n) => (n._id === id ? { ...n, read: true } : n));
+        const updated = prev.map((n) =>
+          n._id === id ? { ...n, read: true } : n
+        );
         updateUnreadCount(updated);
         return updated;
       });
-      // Dispatch event
-      window.dispatchEvent(
-        new CustomEvent("notification-read", {
-          detail: { type: "read", notification: { _id: id } },
-        })
-      );
     } catch (err) {
       console.error("Failed to mark notification as read:", err);
     }
@@ -324,7 +329,7 @@ export default function NotificationsFeed() {
                 <span className="text-[10px] text-slate-500">({notSafeCount})</span>
               )}
             </label>
-            <p className="text-[10px] text-slate-500 pl-5.5">
+            <p className="text-[10px] text-slate-500 pl-[22px]">
               Bulk actions are restricted to risky notifications only
             </p>
           </div>
@@ -442,6 +447,34 @@ export default function NotificationsFeed() {
                             </span>
                           )}
                         </div>
+                        
+                        {/* Threat Pattern Detection */}
+                        {(() => {
+                          // Simple pattern detection based on sender domain
+                          const sender = notification.message || '';
+                          const domainMatch = sender.match(/@([^\s]+)/);
+                          const domain = domainMatch ? domainMatch[1].toLowerCase() : '';
+                          
+                          // Check if this looks like a suspicious domain
+                          const suspiciousDomains = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com'];
+                          const unknownDomain = domain && !suspiciousDomains.includes(domain) && domain.includes('.');
+                          
+                          if (unknownDomain && domain.length > 10) {
+                            return (
+                              <div className="mt-2">
+                                <span className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-orange-500/20 text-orange-400 border border-orange-500/30 rounded">
+                                  <AlertTriangle className="w-3 h-3" />
+                                  ⚠ Pattern Detected
+                                </span>
+                                <p className="text-xs text-gray-400 mt-1">
+                                  Potential coordinated phishing campaign
+                                </p>
+                              </div>
+                            );
+                          }
+                          
+                          return null;
+                        })()}
                       </div>
                     </div>
 
