@@ -57,8 +57,9 @@ export async function POST(request: NextRequest) {
     );
 
     // Add notification to store
+    const baseUrl = new URL(request.url).origin;
     const notificationResponse = await fetch(
-      'http://localhost:3000/api/notifications/manage',
+      `${baseUrl}/api/notifications/manage`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
