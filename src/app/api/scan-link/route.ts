@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { scanLink, scanTextForLinks } from '@/lib/link-scanner';
 import { createDatasetRecord } from '@/lib/dataset';
-import { createScanNotification } from '@/app/api/notifications/manage/route';
+import { createScanNotification } from '@/lib/notifications';
 
 export async function POST(request: NextRequest) {
   try {
@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
 
     // Add notification to store
     const notificationResponse = await fetch(
-      'http://localhost:3000/api/notifications/manage',
+      `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/notifications/manage`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -5,7 +5,7 @@ export interface EscalationRule {
   id: string;
   name: string;
   condition: (notification: any) => boolean;
-  action: (notification: any, user: string) => void;
+  action: (notification: any, user: string) => { escalated: boolean; caseId?: string; reason?: string } | void;
   priority: number;
 }
 
@@ -75,7 +75,7 @@ export function getEscalationBanner(notifications: any[], user: string): string 
   for (const notification of notifications) {
     const escalation = checkEscalationRules(notification, user);
     if (escalation?.escalated) {
-      return escalation.bannerMessage;
+      return escalation.bannerMessage || null;
     }
   }
   

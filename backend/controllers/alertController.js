@@ -17,8 +17,6 @@ async function getAlerts(req, res) {
         ? undefined
         : acknowledgedParam === "true";
 
-    console.log("API Hit: GET /api/alerts");
-    console.log("DATA SOURCE: MONGODB");
     const data = await alertService.getAlerts({ 
       acknowledged,
       severity: req.query.severity,
@@ -50,8 +48,6 @@ async function createAlert(req, res) {
       return res.status(200).json(result);
     }
 
-    console.log("API Hit: POST /api/alerts");
-    console.log("Incoming Data:", req.body);
     const result = await alertService.createAlert(req.body);
     logger.info("Alert Created", req.user ? req.user.email : "system", { severity: result.alert.severity, type: result.alert.type });
     

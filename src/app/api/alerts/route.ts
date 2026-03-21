@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { emitAlert } from "@/socket-server";
 import {
   acknowledgeAlert,
   createAlert,
@@ -39,23 +38,10 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      emitAlert({
-        type: "acknowledged",
-        alertId: body.alertId,
-        severity: result.alert?.severity ?? "medium",
-        notification: result.alert,
-      });
-
       return NextResponse.json(result);
     }
 
     const result = await createAlert(body);
-
-    emitAlert({
-      type: "new",
-      severity: result.alert.severity,
-      notification: result.alert,
-    });
 
     return NextResponse.json(result, { status: 201 });
   } catch (error) {

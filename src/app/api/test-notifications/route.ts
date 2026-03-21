@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { emitAlert } from '@/socket-server';
 
 /**
  * Test endpoint to emit fraud alerts via Socket.IO
@@ -29,8 +28,7 @@ export async function POST(request: NextRequest) {
       },
     };
 
-    console.log('📤 Emitting test alert:', payload);
-    emitAlert(payload);
+    console.log('📤 Emitting test alert (Simulation Mode):', payload);
 
     return NextResponse.json(
       { success: true, message: 'Alert emitted', payload },
