@@ -101,7 +101,7 @@ export function NotificationToastSystem({ className }: NotificationToastSystemPr
     const initSocket = async () => {
       try {
         const { io } = await import('socket.io-client');
-        const socketInstance = io("http://localhost:5000", { transports: ["websocket"],
+        const socketInstance = io(process.env.NEXT_PUBLIC_BACKEND_URL || "https://argus-backend.onrender.com", {
           transports: ['websocket', 'polling']
         });
 

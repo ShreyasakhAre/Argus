@@ -224,6 +224,25 @@ This improves:
 
 # 🚀 Deployment
 
+## Backend (Render)
+
+- **Root directory:** `backend`
+- **Build command:** `npm install --legacy-peer-deps`
+- **Start command:** `node server.js`
+- **Environment variables:**
+  - `MONGO_URI` — MongoDB connection string
+  - `JWT_SECRET` — JWT signing secret
+  - `FRONTEND_URL` — Deployed frontend URL (e.g. `https://your-app.vercel.app`)
+
+## Frontend (Vercel)
+
+- **Root directory:** project root
+- **Build command:** `npm run build`
+- **Environment variables:**
+  - `NEXT_PUBLIC_BACKEND_URL` — Deployed backend URL (e.g. `https://your-backend.onrender.com`)
+
+---
+
 ## Development
 
 ```bash

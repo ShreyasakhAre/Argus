@@ -14,7 +14,7 @@ const port = process.env.BACKEND_PORT || 5000;
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:3000", process.env.FRONTEND_URL || "https://argus-frontend.vercel.app"],
+    origin: [process.env.FRONTEND_URL || "https://argus-frontend.vercel.app"],
     methods: ["GET", "POST", "PATCH"],
     credentials: true
   },
