@@ -101,7 +101,7 @@ export function NotificationToastSystem({ className }: NotificationToastSystemPr
     const initSocket = async () => {
       try {
         const { io } = await import('socket.io-client');
-        const socketInstance = io('http://localhost:4002', {
+        const socketInstance = io("http://localhost:5000", { transports: ["websocket"],
           transports: ['websocket', 'polling']
         });
 
@@ -113,7 +113,7 @@ export function NotificationToastSystem({ className }: NotificationToastSystemPr
           console.log('🔴 Disconnected from notification server');
         });
 
-        socketInstance.on('fraud-alert', (payload: NotificationEventPayload) => {
+        socketInstance.on('new_alert', (payload: NotificationEventPayload) => {
           if (isNotificationRelevant(payload)) {
             const newToast: ToastNotification = {
               id: Math.random().toString(36).substr(2, 9),

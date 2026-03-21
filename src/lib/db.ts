@@ -1,8 +1,3 @@
-import mongoose from "mongoose";
+import { connectDB as sharedConnectDB } from "../../backend/config/db";
 
-const MONGODB_URI = process.env.MONGODB_URI!;
-
-export async function connectDB() {
-  // MongoDB intentionally disabled for dataset-driven mode
-  return;
-}
+export const connectDB = sharedConnectDB;

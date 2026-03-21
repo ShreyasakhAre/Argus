@@ -52,11 +52,11 @@ export function NotificationBell() {
       }
     };
 
-    window.addEventListener('fraud-alert', handleNotificationEvent);
+    window.addEventListener('new_alert', handleNotificationEvent);
     window.addEventListener('notification-read', handleNotificationEvent);
 
     return () => {
-      window.removeEventListener('fraud-alert', handleNotificationEvent);
+      window.removeEventListener('new_alert', handleNotificationEvent);
       window.removeEventListener('notification-read', handleNotificationEvent);
     };
   }, []);

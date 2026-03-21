@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAlert } from "../../../../../backend/services/jsonAlertService";
+import { createAlert } from "../../../../../../backend/services/alertService";
 
 export async function POST(request: Request) {
   try {
@@ -11,7 +11,7 @@ export async function POST(request: Request) {
       notification: result.alert,
     }, { status: 201 });
   } catch (error) {
-    console.error("POST /api/alerts/create error:", error);
+    console.error("POST /api/mongo/alerts/create error:", error);
 
     const status =
       error instanceof Error && error.message.includes("required") ? 400 : 500;

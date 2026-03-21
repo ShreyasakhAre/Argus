@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { io } from 'socket.io-client';
 import { Bell, AlertTriangle, Shield, Zap, CheckCircle, X, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SeverityBadge, SeverityIndicator } from '@/components/ui/severity-badge';
 import { PremiumCard, PremiumCardHeader, PremiumCardTitle, PremiumCardContent } from '@/components/ui/premium-card';
-import type { Alert } from '@/lib/mock-data';
+import type { Alert } from '@/lib/alert-types';
 
 interface AlertPanelProps {
   maxAlerts?: number;
@@ -23,38 +24,69 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [unacknowledged, setUnacknowledged] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [socketStatus, setSocketStatus] = useState("Disconnected");
+  const [apiStatus, setApiStatus] = useState("Connected");
   const handlerRef = useRef<((e: Event) => void) | null>(null);
   const fetchIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/alerts` || "https://argus-backend.onrender.com/api/alerts";
+  
   const fetchAlerts = useCallback(async () => {
+    if (!showAll) {
+      // LIVE ALERTS MODE: Do not fetch historical data. Rely purely on Socket.io stream.
+      setLoading(false);
+      return;
+    }
+    
     try {
-      const res = await fetch(`/api/alerts${showAll ? '' : '?acknowledged=false'}`);
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
+      const res = await fetch(`${API_URL}${showAll ? '' : '?acknowledged=false'}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (!res.ok) throw new Error('Backend API fetch failed');
+      
       const data = await res.json();
-      // Filter to show only CRITICAL alerts
-      const criticalAlerts = data.alerts.filter((alert: Alert) => alert.severity === 'critical');
+      console.log("Frontend API Data:", data);
+      console.log("🟢 Data Source: API (Fetch Success)");
+      setApiStatus("Connected");
+      
+      // Ensure data compatibility matching previous JSON shape cleanly
+      const alertsArray = data.alerts || data.data?.alerts || [];
+      const criticalAlerts = alertsArray.filter((alert: Alert) => alert.severity === 'critical');
+      
       setAlerts(criticalAlerts.slice(0, showAll ? undefined : maxAlerts));
-      setUnacknowledged(data.unacknowledged);
+      setUnacknowledged(data.unacknowledged || 0);
       setLoading(false);
     } catch (err) {
-      console.error('Failed to fetch alerts:', err);
+      console.error('🔴 Failed to fetch from Backend API. No local fallback used.', err);
       setLoading(false);
     }
   }, [showAll, maxAlerts]);
 
   const acknowledgeAlert = useCallback(async (alertId: string) => {
     try {
-      await fetch('/api/alerts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ alertId })
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
+      // Utilizing the new Product Engineer 'status' endpoint implemented earlier
+      const res = await fetch(`${API_URL}/${alertId}/status`, {
+        method: 'PATCH',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ status: 'acknowledged' })
       });
+      
+      if (!res.ok) throw new Error('Backend API acknowledge failed');
+      
+      console.log("🟢 Data Source: API (Ack Success)");
       await fetchAlerts();
     } catch (err) {
-      console.error('Failed to acknowledge alert:', err);
+      console.error('🔴 Failed to acknowledge alert via Backend API:', err);
     }
   }, [fetchAlerts]);
 
-  const formatTime = useCallback((timestamp?: string) => {
+  const formatTime = useCallback((timestamp?: string | Date | number) => {
     if (!timestamp) return 'just now';
     const date = new Date(timestamp);
     const now = new Date();
@@ -82,28 +114,58 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
     };
   }, [fetchAlerts]);
 
-  // Browser event listener for real-time updates
+  // Socket.io real-time listener for Express events
   useEffect(() => {
-    handlerRef.current = (e: Event) => {
-      const event = e as CustomEvent;
-      const { type, severity, notification } = event.detail;
-
-      console.log("🚨 AlertPanel received event:", { type, severity, notification });
-
-      // Immediately refresh alerts when new fraud-alert arrives
-      if (type === "new") {
+    // Enforcing strict WebSocket transport as requested via Prod ENV
+    const socket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "https://argus-backend.onrender.com", {
+      transports: ["websocket"],
+    });
+    
+    socket.on("connect", () => {
+      console.log("✅ SOCKET CONNECTED:", socket.id);
+      setSocketStatus("Connected");
+    });
+    
+    socket.on("connect_error", (err) => {
+      console.log("❌ SOCKET ERROR:", err.message);
+      setSocketStatus("Disconnected");
+    });
+    
+    socket.on("disconnect", () => {
+      console.log("⚠️ Socket disconnected");
+      setSocketStatus("Disconnected");
+    });
+    
+    socket.on("disconnect", () => {
+      console.log("⚠️ Socket disconnected");
+      setSocketStatus("Disconnected");
+    });
+    
+    socket.on("new_alert", (eventData) => {
+      console.log("New alert received:", eventData);
+      
+      if (eventData) {
+        setAlerts(prev => {
+          // Idempotency check to avoid duplicate injections on React Strict Mode
+          if (prev.some(a => a.id === eventData.id || (eventData._id && a._id === eventData._id))) return prev;
+          return [eventData, ...prev].slice(0, 20);
+        });
+        
+        if (
+          eventData.type === "new" ||
+          eventData.status === "pending"
+        ) {
+          setUnacknowledged(prev => prev + 1);
+        }
+      } else {
         fetchAlerts();
       }
-    };
-
-    window.addEventListener("fraud-alert", handlerRef.current);
+    });
 
     return () => {
-      if (handlerRef.current) {
-        window.removeEventListener("fraud-alert", handlerRef.current);
-      }
+      socket.disconnect();
     };
-  }, [fetchAlerts]);
+  }, [showAll, fetchAlerts]);
 
   if (loading) {
     return (
@@ -121,7 +183,15 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
   }
 
   return (
-    <PremiumCard className="flex flex-col h-full overflow-hidden">
+    <PremiumCard className="flex flex-col h-full overflow-hidden relative">
+      {/* Temporary Full System Debug Panel */}
+      <div className="absolute top-2 right-2 bg-slate-950/90 border border-slate-700 p-3 rounded shadow-2xl z-50 text-[10px] font-mono flex flex-col gap-1 backdrop-blur-sm">
+        <div className="font-bold text-slate-300 border-b border-slate-700 pb-1 mb-1">SYSTEM DIAGNOSTIC</div>
+        <div className="flex justify-between gap-4"><span className="text-slate-500">Data Source:</span><span className="text-cyan-400">MONGODB</span></div>
+        <div className="flex justify-between gap-4"><span className="text-slate-500">API Status:</span><span className={apiStatus === 'Connected' ? 'text-green-400' : 'text-red-400'}>{apiStatus}</span></div>
+        <div className="flex justify-between gap-4"><span className="text-slate-500">Socket.io:</span><span className={socketStatus === 'Connected' ? 'text-green-400' : 'text-orange-400'}>{socketStatus}</span></div>
+      </div>
+  
       <PremiumCardHeader className="pb-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -136,7 +206,7 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
               )}
             </div>
             <div>
-              <PremiumCardTitle className="text-base">Live Alerts</PremiumCardTitle>
+              <PremiumCardTitle className="text-base flex items-center gap-2">Live Alerts <span className="text-[9px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded border border-green-500/30 font-bold uppercase tracking-wider hidden sm:inline-block">Data Source: API</span></PremiumCardTitle>
               <p className="text-xs text-slate-400">Security event stream</p>
             </div>
           </div>

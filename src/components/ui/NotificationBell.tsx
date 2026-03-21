@@ -68,10 +68,10 @@ export default function NotificationBell() {
       }
     };
 
-    window.addEventListener("fraud-alert", handler as EventListener);
+    window.addEventListener("new_alert", handler as EventListener);
 
     return () =>
-      window.removeEventListener("fraud-alert", handler as EventListener);
+      window.removeEventListener("new_alert", handler as EventListener);
   }, []);
 
   /* ===============================

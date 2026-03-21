@@ -4,7 +4,7 @@ import {
   acknowledgeAlert,
   createAlert,
   getAlerts,
-} from "../../../../backend/services/jsonAlertService";
+} from "../../../../../backend/services/alertService";
 
 export async function GET(req: NextRequest) {
   try {
@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(data);
   } catch (error) {
-    console.error("GET /api/alerts error:", error);
+    console.error("GET /api/mongo/alerts error:", error);
     return NextResponse.json(
       { alerts: [], total: 0, unacknowledged: 0 },
       { status: 500 }
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
-    console.error("POST /api/alerts error:", error);
+    console.error("POST /api/mongo/alerts error:", error);
 
     const status =
       error instanceof Error && error.message.includes("required") ? 400 : 500;

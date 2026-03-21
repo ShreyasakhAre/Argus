@@ -258,11 +258,11 @@ export default function NotificationsFeed() {
       }
     };
 
-    window.addEventListener("fraud-alert", handlerRef.current);
+    window.addEventListener("new_alert", handlerRef.current);
 
     return () => {
       if (handlerRef.current) {
-        window.removeEventListener("fraud-alert", handlerRef.current);
+        window.removeEventListener("new_alert", handlerRef.current);
       }
     };
   }, []);

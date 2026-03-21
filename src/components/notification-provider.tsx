@@ -18,7 +18,7 @@ function initializeSocket(): Socket {
     return socketInstance;
   }
 
-  socketInstance = io("http://localhost:4002", {
+  socketInstance = io(process.env.NEXT_PUBLIC_BACKEND_URL || "https://argus-backend.onrender.com", { transports: ["websocket"],
     reconnection: true,
     reconnectionDelay: RECONNECT_DELAY,
     reconnectionDelayMax: 10000,
@@ -47,8 +47,8 @@ function initializeSocket(): Socket {
     reconnectAttempts++;
   });
 
-  // Main fraud-alert listener
-  socketInstance.on("fraud-alert", (data) => {
+  // Main new_alert listener
+  socketInstance.on("new_alert", (data) => {
     console.log("🔔 SOCKET EVENT:", data);
     dispatchNotificationEvent(data);
   });
@@ -57,20 +57,20 @@ function initializeSocket(): Socket {
 }
 
 /**
- * Dispatch browser event for fraud-alert
+ * Dispatch browser event for new_alert
  * This is the single source of truth for all notification listeners
  */
 export function dispatchNotificationEvent(data: any) {
   const eventData = {
     type: data.type || "new", // "new", "acknowledged", etc.
-    notification: data.notification || data,
-    severity: data.notification?.severity || data.severity || "medium",
+    notification: data || data,
+    severity: data?.severity || data.severity || "medium",
     timestamp: new Date(),
   };
 
   // Dispatch browser event (single source of truth)
   window.dispatchEvent(
-    new CustomEvent("fraud-alert", { detail: eventData })
+    new CustomEvent("new_alert", { detail: eventData })
   );
 
   // Show toast based on severity and type
@@ -222,7 +222,7 @@ export function NotificationProvider({
         try {
           const res = await fetch(`/api/notifications/stream`);
           const data = await res.json();
-          const batch = data.notifications || [];
+          const batch = datas || [];
 
           for (const notif of batch) {
             dispatchNotificationEvent({

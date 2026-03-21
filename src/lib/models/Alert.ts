@@ -1,22 +1,3 @@
-import mongoose from "mongoose";
+import { Alert as SharedAlertModel } from "../../../backend/models/Alert";
 
-const AlertSchema = new mongoose.Schema({
-  severity: {
-    type: String,
-    enum: ["critical", "high", "medium", "low"],
-    required: true,
-  },
-  message: String,
-  notification_id: String,
-  acknowledged: {
-    type: Boolean,
-    default: false,
-  },
-  timestamp: {
-    type: String,
-    default: () => new Date().toISOString(),
-  },
-});
-
-export const Alert =
-  mongoose.models.Alert || mongoose.model("Alert", AlertSchema);
+export const Alert = SharedAlertModel;

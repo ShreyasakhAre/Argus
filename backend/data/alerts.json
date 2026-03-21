@@ -1,0 +1,70 @@
+[
+  {
+    "id": "A001",
+    "notification_id": "N021",
+    "type": "new_threat",
+    "severity": "critical",
+    "message": "Ransomware threat detected - Immediate action required",
+    "timestamp": "2024-01-17T08:30:15.000Z",
+    "acknowledged": false,
+    "details": {
+      "pattern": "TP003",
+      "sender": "ransomware@criminal.org"
+    }
+  },
+  {
+    "id": "A002",
+    "notification_id": "N024",
+    "type": "pattern_match",
+    "severity": "critical",
+    "message": "CEO Fraud pattern detected - Executive impersonation attempt",
+    "timestamp": "2024-01-17T11:00:22.000Z",
+    "acknowledged": false,
+    "details": {
+      "pattern": "TP001",
+      "target": "ceo@company.com"
+    }
+  },
+  {
+    "id": "A003",
+    "notification_id": "N016",
+    "type": "high_risk",
+    "severity": "high",
+    "message": "Data exfiltration attempt - SSN data request flagged",
+    "timestamp": "2024-01-16T11:00:45.000Z",
+    "acknowledged": true,
+    "details": {
+      "pattern": "TP004",
+      "risk_score": 0.97
+    }
+  },
+  {
+    "id": "A004",
+    "notification_id": "N013",
+    "type": "pattern_match",
+    "severity": "high",
+    "message": "Credential phishing detected - Account compromise attempt",
+    "timestamp": "2024-01-16T09:30:33.000Z",
+    "acknowledged": true,
+    "details": {
+      "pattern": "TP002",
+      "sender": "phishing@malicious.net"
+    }
+  },
+  {
+    "id": "A005",
+    "notification_id": "N007",
+    "type": "bulk_attack",
+    "severity": "high",
+    "message": "Multiple wire transfer requests from suspicious sources",
+    "timestamp": "2024-01-15T14:00:18.000Z",
+    "acknowledged": true,
+    "details": {
+      "related_notifications": [
+        "N002",
+        "N007",
+        "N011"
+      ]
+    }
+  }
+]
