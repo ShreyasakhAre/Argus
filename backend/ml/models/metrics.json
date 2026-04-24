@@ -1,0 +1,28 @@
+{
+  "accuracy": 0.9995,
+  "precision": 0.9995,
+  "recall": 0.9995,
+  "f1": 0.9995,
+  "train_size": 8000,
+  "test_size": 2000,
+  "feedback_applied": 0,
+  "model_version": "argus-ml-20260424171853",
+  "labels": {
+    "0": "safe",
+    "1": "suspicious",
+    "2": "phishing",
+    "3": "malware",
+    "4": "bec"
+  },
+  "class_distribution": {
+    "safe": 8661,
+    "suspicious": 281,
+    "phishing": 785,
+    "malware": 88,
+    "bec": 185
+  },
+  "feature_count": {
+    "text": 3909,
+    "meta": 42
+  }
+}

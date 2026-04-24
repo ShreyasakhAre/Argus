@@ -1,5 +1,13 @@
-import type { Notification } from './ml-service';
-import type { Feedback } from './ml-service';
+import { DatasetNotification } from './types';
+
+// Feedback interface for analyst reviews
+export interface Feedback {
+  notification_id: string;
+  analyst_id: string;
+  decision: 'confirm' | 'false_positive' | 'escalate';
+  timestamp: string;
+  comments?: string;
+}
 
 export interface SecurityScoreResult {
   score: number;
@@ -28,7 +36,7 @@ export interface SecurityScoreResult {
  * - Consistent safe behavior: +5 points
  */
 export function calculateSecurityScore(
-  notifications: Notification[],
+  notifications: DatasetNotification[],
   feedback: Feedback[] = []
 ): SecurityScoreResult {
   // Start with base score of 100
@@ -45,12 +53,12 @@ export function calculateSecurityScore(
     if (!notification) return;
 
     // Deduction: Confirmed malicious but user marked safe
-    if (fb.decision === 'false_positive' && notification.is_flagged) {
+    if (fb.decision === 'false_positive' && notification.is_malicious === 1) {
       incorrectSafeMarking += 10;
     }
 
     // Deduction: User confirmed malicious (good action, but small deduction for complexity)
-    if (fb.decision === 'confirm' && notification.is_flagged) {
+    if (fb.decision === 'confirm' && notification.is_malicious === 1) {
       maliciousConfirmed += 5;
     }
 
@@ -60,7 +68,7 @@ export function calculateSecurityScore(
       const notificationTime = new Date(notification.timestamp);
       const responseTimeHours = (feedbackTime.getTime() - notificationTime.getTime()) / (1000 * 60 * 60);
       
-      if (responseTimeHours < 1 && notification.is_flagged) {
+      if (responseTimeHours < 1 && notification.is_malicious === 1) {
         bonusPoints += 2;
       }
     }
@@ -68,7 +76,7 @@ export function calculateSecurityScore(
 
   // Calculate deductions from notification patterns
   const highRiskNotifications = notifications.filter(n => 
-    n.risk_level === 'High' && !n.is_flagged
+    n.risk_score > 0.7 && n.review_status === 'Pending'
   );
   
   // Check if high-risk notifications were ignored (no feedback provided)
@@ -80,7 +88,7 @@ export function calculateSecurityScore(
   });
 
   // Bonus: Consistent safe behavior
-  const safeNotifications = notifications.filter(n => !n.is_flagged);
+  const safeNotifications = notifications.filter(n => n.is_malicious === 0);
   const safeBehaviorRatio = safeNotifications.length / notifications.length;
   if (safeBehaviorRatio > 0.8) {
     bonusPoints += 5;
@@ -123,18 +131,18 @@ export function calculateSecurityScore(
  * Get average security score for a department
  */
 export function calculateDepartmentSecurityScore(
-  notifications: Notification[],
+  notifications: DatasetNotification[],
   feedback: Feedback[] = [],
-  departmentId?: string
+  department?: string
 ): SecurityScoreResult {
-  const deptNotifications = departmentId 
-    ? notifications.filter(n => n.department === departmentId)
+  const deptNotifications = department 
+    ? notifications.filter(n => n.department === department)
     : notifications;
 
-  const deptFeedback = departmentId
+  const deptFeedback = department
     ? feedback.filter(fb => {
         const notification = notifications.find(n => n.notification_id === fb.notification_id);
-        return notification && notification.department === departmentId;
+        return notification && notification.department === department;
       })
     : feedback;
 

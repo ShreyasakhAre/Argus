@@ -32,27 +32,39 @@ export interface Notification {
   risk_level: 'Low' | 'Medium' | 'High';
   is_flagged: boolean;
   source_app: SourceApp;
+  /** Analyst-normalised field: 'Threat' | 'Safe' | 'open' etc. */
+  status?: string;
+  /** Bell-read tracking field appended by toBellNotification() */
+  read?: boolean;
 }
 
 export interface Stats {
   total_notifications: number;
   flagged_notifications: number;
   benign_notifications: number;
+  /** Global risk-level breakdown (returned by FastAPI /stats) */
+  high_risk?: number;
+  medium_risk?: number;
+  low_risk?: number;
+  flagged_percentage?: number;
   model_metrics: {
     accuracy: number;
     precision: number;
     recall: number;
     f1_score: number;
     total_samples: number;
-    malicious_samples: number;
-    benign_samples: number;
+    /** Only present in mock-data path */
+    malicious_samples?: number;
+    /** Only present in mock-data path */
+    benign_samples?: number;
   };
   department_stats: Record<string, {
     total: number;
     flagged: number;
     avg_risk: number;
   }>;
-  feature_importance: Record<string, number>;
+  /** Only present in mock-data path */
+  feature_importance?: Record<string, number>;
 }
 
 export interface Explanation {

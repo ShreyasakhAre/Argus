@@ -16,6 +16,15 @@ export interface AuditEvent {
   error?: string;
   ipAddress?: string;
   userAgent?: string;
+  // Extended optional fields (present in API/permission events)
+  endpoint?: string;
+  method?: string;
+  statusCode?: number;
+  requiredPermissions?: string[];
+  permission?: PermissionType | PermissionType[];
+  targetRole?: Role;
+  targetUser?: string;
+  changes?: Record<string, any>;
 }
 
 export interface PermissionAuditEvent extends AuditEvent {
@@ -108,12 +117,14 @@ export async function logApiAccess(
     action: 'API_ACCESS',
     userId,
     userRole,
+    endpoint,
+    method,
     details: {
       ...details,
       permission,
     },
     timestamp: new Date(),
-  } as ApiAuditEvent & { endpoint: string; method: string });
+  } as ApiAuditEvent);
 }
 
 /**

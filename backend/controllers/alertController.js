@@ -1,142 +1,209 @@
-const alertService = require("../services/alertService");
-const logger = require("../utils/logger");
+/**
+ * Alert Controller
+ * All data comes from datasetService (argus_notifications_10000.csv loaded in memory).
+ * NO MongoDB queries. NO memory fallback. NO mock data.
+ */
 
-function resolveErrorStatus(error) {
-  if (error instanceof Error && error.message.includes("required")) {
-    return 400;
-  }
+const datasetService = require('../services/datasetService');
+const { getRealTimeAlertsService } = require('../services/realTimeAlerts');
+const logger = require('../utils/logger');
 
-  return 500;
-}
-
+// GET /api/alerts
 async function getAlerts(req, res) {
   try {
-    const acknowledgedParam = req.query.acknowledged;
-    const acknowledged =
-      acknowledgedParam === undefined
-        ? undefined
-        : acknowledgedParam === "true";
+    const {
+      review_status,
+      threat_category,
+      department,
+      channel,
+      priority,
+      org_id,
+      min_risk_score,
+      max_risk_score,
+      is_malicious,
+      startDate,
+      endDate,
+      search,
+      limit = 1000,
+      page = 1,
+      sortBy = 'timestamp',
+      sortOrder = 'desc',
+    } = req.query;
 
-    const data = await alertService.getAlerts({ 
-      acknowledged,
-      severity: req.query.severity,
-      startDate: req.query.startDate,
-      endDate: req.query.endDate,
-      limit: req.query.limit,
-      page: req.query.page
+    const filters = {};
+    if (review_status) filters.review_status = review_status;
+    if (threat_category) filters.threat_category = threat_category;
+    if (department) filters.department = department;
+    if (channel) filters.channel = channel;
+    if (priority) filters.priority = priority;
+    if (org_id) filters.org_id = org_id;
+    if (is_malicious !== undefined) filters.is_malicious = is_malicious;
+    if (min_risk_score !== undefined) filters.min_risk_score = min_risk_score;
+    if (max_risk_score !== undefined) filters.max_risk_score = max_risk_score;
+    if (startDate) filters.startDate = startDate;
+    if (endDate) filters.endDate = endDate;
+    if (search) filters.search = search;
+
+    const result = datasetService.query(filters, { page, limit, sortBy, sortOrder });
+
+    return res.status(200).json({
+      success: true,
+      data: result.data,
+      pagination: result.pagination,
     });
-    return res.status(200).json(data);
   } catch (error) {
-    console.error("GET /api/alerts error:", error);
-    return res.status(500).json({ alerts: [], total: 0, unacknowledged: 0 });
+    logger.error('GET /api/alerts error:', error.message);
+    return res.status(500).json({ success: false, message: error.message });
   }
 }
 
-async function createAlert(req, res) {
-  try {
-    if (req.body?.alertId) {
-      const result = await alertService.acknowledgeAlert(req.body.alertId);
-
-      if (!result.success) {
-        return res.status(404).json({
-          success: false,
-          alert: null,
-          message: "Alert not found.",
-        });
-      }
-
-      return res.status(200).json(result);
-    }
-
-    const result = await alertService.createAlert(req.body);
-    logger.info("Alert Created", req.user ? req.user.email : "system", { severity: result.alert.severity, type: result.alert.type });
-    
-    const io = req.app.get("io");
-    if (io && result.success) {
-      console.log("Emitting new_alert event");
-      io.emit("new_alert", {
-        type: "new",
-        severity: result.alert.severity,
-        notification: result.alert
-      });
-    }
-
-    return res.status(201).json(result);
-  } catch (error) {
-    console.error("POST /api/alerts error:", error);
-    return res.status(resolveErrorStatus(error)).json({
-      success: false,
-      alert: null,
-      message: error instanceof Error ? error.message : "Unable to save alert.",
-    });
-  }
-}
-
-async function acknowledgeAlert(req, res) {
-  try {
-    const result = await alertService.acknowledgeAlert(req.params.id);
-
-    if (!result.success) {
-      return res.status(404).json({
-        success: false,
-        alert: null,
-        message: "Alert not found.",
-      });
-    }
-
-    const io = req.app.get("io");
-    if (io) {
-      io.emit("new_alert", {
-        type: "acknowledged",
-        severity: result.alert.severity,
-        notification: result.alert
-      });
-    }
-
-    return res.status(200).json(result);
-  } catch (error) {
-    console.error("PATCH /api/alerts/:id/acknowledge error:", error);
-    return res.status(500).json({
-      success: false,
-      alert: null,
-      message: "Unable to acknowledge alert.",
-    });
-  }
-}
-
-
-async function updateStatus(req, res) {
-  try {
-    const { status } = req.body;
-    if (!status || !["pending", "resolved", "acknowledged"].includes(status)) {
-      return res.status(400).json({ success: false, message: "Invalid status" });
-    }
-    const result = await alertService.updateAlertStatus(req.params.id, status);
-    if (!result.success) return res.status(404).json({ success: false, message: "Alert not found." });
-    
-    // Broadcast status update
-    const io = req.app.get("io");
-    if (io) io.emit("new_alert", { alertId: req.params.id, status: result.alert.status, notification: result.alert });
-
-    return res.status(200).json(result);
-  } catch (err) {
-    return res.status(500).json({ success: false, message: "Server error" });
-  }
-}
-
+// GET /api/alerts/analytics
 async function getAnalytics(req, res) {
   try {
-    const data = await alertService.getAnalytics();
-    return res.status(200).json({ success: true, data });
-  } catch (err) {
-    return res.status(500).json({ success: false, message: "Server error" });
+    const { department, org_id } = req.query;
+    const filters = {};
+    if (department) filters.department = department;
+    if (org_id) filters.org_id = org_id;
+
+    const stats = datasetService.getStats(filters);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        summary: {
+          totalAlerts: stats.totalAlerts,
+          avgRiskScore: stats.avgRiskScore,
+          maliciousCount: stats.maliciousCount,
+          highRiskCount: stats.highRiskCount,
+          pendingReview: stats.pendingReview,
+          approvedCount: stats.approvedCount,
+          rejectedCount: stats.rejectedCount,
+        },
+        threatBreakdown: stats.threatBreakdown,
+        departmentBreakdown: stats.departmentBreakdown,
+      },
+    });
+  } catch (error) {
+    logger.error('GET /api/alerts/analytics error:', error.message);
+    return res.status(500).json({ success: false, message: error.message });
   }
+}
+
+// PATCH /api/alerts/:id/status
+async function updateStatus(req, res) {
+  try {
+    const { id } = req.params;
+    const { status, analyst_feedback } = req.body;
+
+    const validStatuses = ['Approved', 'Rejected', 'Pending'];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`,
+      });
+    }
+
+    const updated = datasetService.updateStatus(id, {
+      review_status: status,
+      analyst_feedback,
+    });
+
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Alert not found.' });
+    }
+
+    // Broadcast update via Socket.IO
+    const rtService = getRealTimeAlertsService();
+    if (rtService) {
+      rtService.broadcastUpdate(updated, 'updated');
+    }
+
+    logger.info(`Alert ${id} status updated to ${status}`);
+    return res.status(200).json({ success: true, data: updated });
+  } catch (error) {
+    logger.error('PATCH /api/alerts/:id/status error:', error.message);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+// PATCH /api/alerts/:id/acknowledge  (maps Pending→Approved for quick ack)
+async function acknowledgeAlert(req, res) {
+  try {
+    const { id } = req.params;
+    const updated = datasetService.updateStatus(id, { review_status: 'Approved' });
+
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Alert not found.' });
+    }
+
+    const rtService = getRealTimeAlertsService();
+    if (rtService) {
+      rtService.broadcastUpdate(updated, 'acknowledged');
+    }
+
+    return res.status(200).json({ success: true, data: updated });
+  } catch (error) {
+    logger.error('PATCH /api/alerts/:id/acknowledge error:', error.message);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+// GET /api/alerts/timeline (derives events from in-memory dataset)
+async function getTimeline(req, res) {
+  try {
+    const { notification_id } = req.query;
+
+    let items;
+    if (notification_id) {
+      const item = datasetService.getById(notification_id);
+      items = item ? [item] : [];
+    } else {
+      const { data } = datasetService.query({}, { page: 1, limit: 1000, sortBy: 'timestamp', sortOrder: 'desc' });
+      items = data;
+    }
+
+    const events = [];
+    items.forEach((alert) => {
+      events.push({
+        id: `E_${alert.notification_id}_detected`,
+        notification_id: alert.notification_id,
+        event_type: 'detected',
+        timestamp: alert.timestamp,
+        details: `Threat detected: ${alert.threat_category} (risk ${Math.round(alert.risk_score * 100)}%)`,
+      });
+      if (alert.review_status !== 'Pending') {
+        events.push({
+          id: `E_${alert.notification_id}_reviewed`,
+          notification_id: alert.notification_id,
+          event_type: alert.review_status === 'Approved' ? 'approved' : 'rejected',
+          timestamp: alert.timestamp,
+          details: `Alert ${alert.review_status.toLowerCase()}`,
+        });
+      }
+    });
+
+    events.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    return res.status(200).json({ success: true, data: { events, total: events.length } });
+  } catch (error) {
+    logger.error('GET /api/alerts/timeline error:', error.message);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+// POST /api/alerts — Not supported in dataset-only mode
+async function createAlert(req, res) {
+  return res.status(405).json({
+    success: false,
+    message: 'Creating alerts is disabled. The system operates on the pre-loaded dataset.',
+  });
 }
 
 module.exports = {
-  acknowledgeAlert,
-  createAlert,
   getAlerts,
-  updateStatus,
   getAnalytics,
+  updateStatus,
+  acknowledgeAlert,
+  getTimeline,
+  createAlert,
 };

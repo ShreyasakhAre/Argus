@@ -24,7 +24,6 @@ export function ProfileSection() {
   const roleConfig = {
     admin: { label: 'Admin', color: 'bg-red-500/10 text-red-400 border-red-500/30' },
     fraud_analyst: { label: 'Fraud Analyst', color: 'bg-blue-500/10 text-blue-400 border-blue-500/30' },
-    analyst: { label: 'Fraud Analyst', color: 'bg-blue-500/10 text-blue-400 border-blue-500/30' },
     department_head: { label: 'Department Head', color: 'bg-green-500/10 text-green-400 border-green-500/30' },
     auditor: { label: 'Auditor', color: 'bg-purple-500/10 text-purple-400 border-purple-500/30' },
     employee: { label: 'Employee', color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30' },
@@ -33,9 +32,7 @@ export function ProfileSection() {
   const currentRoleConfig = roleConfig[user?.role as keyof typeof roleConfig] || roleConfig.employee;
   
   // Format role display for UI
-  const roleDisplay = user?.role === "fraud_analyst" || user?.role === "analyst"
-    ? "Fraud Analyst"
-    : user?.role?.replace("_", " ").replace(/\b\w/g, l => l.toUpperCase());
+  const roleDisplay = user?.role?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
   
   // Debug: Log the final role config
   console.log('ProfileSection - Role config:', currentRoleConfig);

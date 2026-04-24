@@ -6,7 +6,7 @@ import { Shield, Search, Building2, User, FileText } from 'lucide-react';
 
 const roleConfig: Record<Role, { label: string; icon: React.ReactNode; color: string }> = {
   admin: { label: 'Admin', icon: <Shield className="w-4 h-4" />, color: 'text-red-500' },
-  analyst: { label: 'Fraud Analyst', icon: <Search className="w-4 h-4" />, color: 'text-blue-500' },
+  fraud_analyst: { label: 'Fraud Analyst', icon: <Search className="w-4 h-4" />, color: 'text-blue-500' },
   department_head: { label: 'Department Head', icon: <Building2 className="w-4 h-4" />, color: 'text-green-500' },
   employee: { label: 'Employee', icon: <User className="w-4 h-4" />, color: 'text-yellow-500' },
   auditor: { label: 'Auditor', icon: <FileText className="w-4 h-4" />, color: 'text-purple-500' },

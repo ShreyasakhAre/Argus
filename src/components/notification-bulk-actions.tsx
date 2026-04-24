@@ -11,15 +11,15 @@ import {
   CheckCircle2,
   Info,
 } from 'lucide-react';
-import type { Notification } from '@/lib/ml-service';
+import type { DatasetNotification } from '@/lib/types';
 import type { Role } from '@/lib/types';
 
 // ============================================
 // "Not Safe" definition (UI-only)
 // ============================================
-export function isNotSafe(n: Notification): boolean {
-  if (n.is_flagged) return true;
-  if (n.risk_level === 'Medium' || n.risk_level === 'High') return true;
+export function isNotSafe(n: DatasetNotification): boolean {
+  if (n.is_malicious === 1) return true;
+  if (n.threat_category === 'suspicious' || n.threat_category === 'high_risk_suspicious') return true;
   return false;
 }
 
@@ -53,7 +53,7 @@ const ROLE_ACTIONS: Record<Role, BulkActionType[]> = {
 // ============================================
 // Hook: useNotificationBulkSelect
 // ============================================
-export function useNotificationBulkSelect(notifications: Notification[]) {
+export function useNotificationBulkSelect(notifications: DatasetNotification[]) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [feedback, setFeedback] = useState<string | null>(null);
 
@@ -209,7 +209,7 @@ export function BulkFeedbackToast({ message }: BulkFeedbackToastProps) {
 // Component: NotificationCheckbox (for each row/card)
 // ============================================
 interface NotificationCheckboxProps {
-  notification: Notification;
+  notification: DatasetNotification;
   isSelected: boolean;
   onToggle: (id: string) => void;
 }

@@ -58,12 +58,14 @@ export function checkEscalationRules(notification: any, user: string): {
     if (rule.condition(notification)) {
       const result = rule.action(notification, user);
       
-      return {
-        escalated: true,
-        caseId: result.caseId,
-        reason: result.reason,
-        bannerMessage: `🚨 Auto-Escalated: ${rule.name} - ${result.reason}`
-      };
+      if (result) {
+        return {
+          escalated: true,
+          caseId: result.caseId,
+          reason: result.reason,
+          bannerMessage: `🚨 Auto-Escalated: ${rule.name} - ${result.reason}`
+        };
+      }
     }
   }
   

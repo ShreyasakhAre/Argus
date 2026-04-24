@@ -8,7 +8,7 @@
 import { ReactNode } from 'react';
 import { PermissionType } from '@/lib/types';
 import { canUserPerform } from '@/lib/permissions';
-import { useUser } from '@/hooks/useUser';
+import { useAuth } from '@/components/auth-provider';
 
 interface PermissionGuardProps {
   // Permission(s) required
@@ -61,7 +61,7 @@ export function PermissionGuard({
   className,
   evalMode = 'render',
 }: PermissionGuardProps) {
-  const { user, loading } = useUser();
+  const { user, isLoading: loading } = useAuth();
 
   // Show loading state while fetching user data
   if (loading && evalMode === 'mount') {

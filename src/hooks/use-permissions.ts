@@ -13,6 +13,11 @@ import {
   canViewAuditLogs,
   canRetrainModel,
   canManageRolesPermissions,
+  canAssignCases,
+  canReviewCases,
+  canEscalateCases,
+  canImportDataset,
+  canPerformBulkOperations,
   isAdmin,
   getNotificationScope,
 } from '@/lib/permissions';
@@ -47,6 +52,11 @@ export function usePermissions() {
     canViewAuditLogs: canViewAuditLogs(user),
     canRetrainModel: canRetrainModel(user),
     canManageRolesPermissions: canManageRolesPermissions(user),
+    canAssignCases: canAssignCases(user),
+    canReviewCases: canReviewCases(user),
+    canEscalateCases: canEscalateCases(user),
+    canImportDataset: canImportDataset(user),
+    canPerformBulkOperations: canPerformBulkOperations(user),
 
     // Helper functions
     getNotificationScope: getNotificationScope(user),

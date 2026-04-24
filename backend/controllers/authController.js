@@ -1,63 +1,82 @@
-const jwt = require("jsonwebtoken");
-const bcrypt = require("bcryptjs");
-const { User } = require("../models/User");
-const { JWT_SECRET } = require("../middleware/authMiddleware");
-const logger = require("../utils/logger");
+/**
+ * Auth Controller — Demo Mode
+ * No MongoDB required. Issues real JWTs signed with JWT_SECRET.
+ * Any email/password is accepted as long as email and role are provided.
+ * This is the ONLY auth mechanism — no silent fallbacks.
+ */
+
+const jwt = require('jsonwebtoken');
+const { JWT_SECRET } = require('../middleware/authMiddleware');
+const logger = require('../utils/logger');
+
+const VALID_ROLES = [
+  'admin',
+  'fraud_analyst',
+  'department_head',
+  'employee',
+  'auditor',
+];
+
+const ROLE_DISPLAY_NAMES = {
+  admin: 'Administrator',
+  fraud_analyst: 'Fraud Analyst',
+  department_head: 'Department Head',
+  employee: 'Employee',
+  auditor: 'Auditor',
+};
 
 async function login(req, res) {
   try {
-    const { email, password } = req.body;
+    const { email, password, role, orgId } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ success: false, message: "Email and password required." });
+    // Validate required fields
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Email is required.' });
     }
-
-    // Explicitly select password for comparison
-    let user = await User.findOne({ email }).select("+password");
-
-    // For debugging/interview demonstration: Automatically create admin if user doesn't exist
-    if (!user) {
-      console.log(`[auth] User ${email} not found. Creating a default test user due to missing seed.`);
-      const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash(password, salt);
-      user = await User.create({
-        name: "Test User",
-        email,
-        password: hashedPassword,
-        role: email.includes("admin") ? "admin" : (email.includes("analyst") ? "analyst" : "viewer")
+    if (!role) {
+      return res.status(400).json({ success: false, message: 'Role is required.' });
+    }
+    if (!VALID_ROLES.includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid role. Must be one of: ${VALID_ROLES.join(', ')}`,
       });
-    } else {
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) {
-        return res.status(401).json({ success: false, message: "Invalid credentials." });
-      }
+    }
+    if (!password || password.trim() === '') {
+      return res.status(400).json({ success: false, message: 'Password is required.' });
     }
 
-    const token = jwt.sign(
-      { id: user._id, email: user.email, role: user.role },
-      JWT_SECRET,
-      { expiresIn: "1d" }
-    );
+    // Demo mode: accept any non-empty password
+    const userId = `user_${email.replace(/[^a-z0-9]/gi, '_').toLowerCase()}`;
+    const name = ROLE_DISPLAY_NAMES[role];
 
-    logger.info("User Login", user.email, { role: user.role });
+    const tokenPayload = {
+      id: userId,
+      email,
+      role,
+      orgId: orgId || 'ORG001',
+      name,
+    };
+
+    const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: '1d' });
+
+    logger.info(`Login success: ${email} as ${role} from ${orgId || 'ORG001'}`);
 
     return res.status(200).json({
       success: true,
       token,
       user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role
-      }
+        id: userId,
+        name,
+        email,
+        role,
+        orgId: orgId || 'ORG001',
+      },
     });
-
   } catch (error) {
-    console.error("POST /api/auth/login error:", error);
-    return res.status(500).json({ success: false, message: "Internal server error." });
+    logger.error('POST /api/auth/login error:', error.message);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
   }
 }
 
-module.exports = {
-  login
-};
+module.exports = { login };

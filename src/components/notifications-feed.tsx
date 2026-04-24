@@ -35,38 +35,53 @@ interface Notification {
   category?: string;
   risk_level?: string;
   is_flagged?: boolean;
+  ai_explanation?: string;
+  signals?: string[];
 }
 
 /** "Not Safe" = Medium/High risk OR flagged */
 function isNotSafe(n: Notification): boolean {
   if (n.is_flagged) return true;
   if (n.risk_level === 'Medium' || n.risk_level === 'High') return true;
-  // Also consider severity mapping: critical/high severity = not safe
-  if (n.severity === 'critical' || n.severity === 'high') return true;
+  // Also consider severity mapping: critical/high risk threats = not safe
+  if (n.severity === 'critical' || n.severity === 'high_risk_suspicious' || n.severity === 'bec' || n.severity === 'ransomware' || n.severity === 'phishing') return true;
   return false;
 }
 
 const severityIcons = {
-  critical: AlertCircle,
-  high: AlertTriangle,
-  medium: AlertTriangle,
   safe: Check,
+  low_risk_suspicious: AlertTriangle,
+  suspicious: AlertTriangle,
+  high_risk_suspicious: AlertTriangle,
+  bec: AlertCircle,
+  ransomware: AlertCircle,
+  phishing: AlertCircle,
+  critical: AlertCircle,
 };
 
 const severityColors = {
-  critical: "text-red-400",
-  high: "text-orange-400",
-  medium: "text-yellow-400",
   safe: "text-green-400",
+  low_risk_suspicious: "text-blue-400",
+  suspicious: "text-yellow-400",
+  high_risk_suspicious: "text-orange-400",
+  bec: "text-red-400",
+  ransomware: "text-red-400",
+  phishing: "text-red-400",
+  critical: "text-red-400",
 };
 
 const getSeverityStyles = (severity: NotificationSeverity) => {
   switch (severity) {
     case 'critical':
+    case 'bec':
+    case 'ransomware':
+    case 'phishing':
       return 'bg-red-900/20 border-l-4 border-red-500 text-red-100';
-    case 'high':
+    case 'high_risk_suspicious':
+      return 'bg-orange-900/20 border-l-4 border-orange-500 text-orange-100';
+    case 'suspicious':
       return 'bg-yellow-900/20 border-l-4 border-yellow-500 text-yellow-100';
-    case 'medium':
+    case 'low_risk_suspicious':
       return 'bg-blue-900/20 border-l-4 border-blue-500 text-blue-100';
     case 'safe':
       return 'bg-green-900/20 border-l-4 border-green-500 text-green-100';
@@ -78,10 +93,15 @@ const getSeverityStyles = (severity: NotificationSeverity) => {
 const getSeverityIcon = (severity: NotificationSeverity) => {
   switch (severity) {
     case 'critical':
+    case 'bec':
+    case 'ransomware':
+    case 'phishing':
       return '🔴';
-    case 'high':
+    case 'high_risk_suspicious':
       return '🟠';
-    case 'medium':
+    case 'suspicious':
+      return '🟡';
+    case 'low_risk_suspicious':
       return '🟡';
     case 'safe':
       return '✅';
@@ -114,7 +134,7 @@ export default function NotificationsFeed() {
 
   // Select all not-safe currently rendered notifications
   const selectAllNotSafe = useCallback(() => {
-    const notSafeIds = notifications.filter(isNotSafe).map((n) => n._id);
+    const notSafeIds = (Array.isArray(notifications) ? notifications : []).filter(isNotSafe).map((n) => n._id);
     setSelectedIds(new Set(notSafeIds));
   }, [notifications]);
 
@@ -123,10 +143,10 @@ export default function NotificationsFeed() {
     setSelectedIds(new Set());
   }, []);
 
-  const notSafeIds = notifications.filter(isNotSafe).map((n) => n._id);
-    const notSafeCount = notSafeIds.length;
-    const allNotSafeSelected = notSafeCount > 0 && notSafeIds.every((id) => selectedIds.has(id));
-    const someSelected = selectedIds.size > 0;
+  const notSafeIds = (Array.isArray(notifications) ? notifications : []).filter(isNotSafe).map((n) => n._id);
+  const notSafeCount = notSafeIds.length;
+  const allNotSafeSelected = notSafeCount > 0 && notSafeIds.every((id) => selectedIds.has(id));
+  const someSelected = selectedIds.size > 0;
 
   // Bulk action handler (UI-only, no API calls)
   const handleBulkAction = useCallback((action: string) => {
@@ -137,52 +157,64 @@ export default function NotificationsFeed() {
   }, [selectedIds]);
 
   const updateUnreadCount = useCallback((notifs: Notification[]) => {
-    const count = notifs.filter((n) => !n.read).length;
+    const count = (Array.isArray(notifs) ? notifs : []).filter((n) => !n?.read).length;
     setUnreadCount(count);
   }, []);
 
   const load = useCallback(async () => {
     if (!user) return;
-    
+
     try {
       setIsLoading(true);
-      let url = "/api/notifications?limit=100&flagged_only=true";
-      if (filter === 'unread') {
-        url += '&unreadOnly=true';
-      } else if (filter === 'critical') {
-        url += '&risk_level=High';
-      }
-      
-      const res = await fetch(url);
+      const params = new URLSearchParams({ limit: '1000', sortBy: 'risk_score', sortOrder: 'desc' });
+      if (filter === 'unread') params.set('review_status', 'Pending');
+      else if (filter === 'critical') params.set('priority', 'critical');
+
+      const token = localStorage.getItem('argus-token');
+      const res = await fetch(`/api/alerts?${params}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      const rawNotifs = data.notifications || [];
-      
-      // Transform ml-service notifications to system notification format
-        const notifs = rawNotifs.map((n: any) => ({
-          _id: n.notification_id,
-          title: `${n.risk_level} Risk: ${n.source_app} from ${n.sender.split('@')[0]}`,
-          message: n.content,
-          severity: n.risk_level === 'High' ? 'critical' : n.risk_level === 'Medium' ? 'high' : 'medium',
-          timestamp: n.timestamp,
-          createdAt: n.timestamp,
-          read: false,
-          category: n.source_app,
-          risk_level: n.risk_level,
-          is_flagged: n.is_flagged,
-        }));
-      
-        setNotifications(notifs);
-        updateUnreadCount(notifs);
-        // Clear stale selections that no longer match loaded notifications
-        setSelectedIds((prev) => {
-          if (prev.size === 0) return prev;
-          const validIds = new Set(notifs.map((n: Notification) => n._id));
-          const next = new Set<string>();
-          prev.forEach((id) => { if (validIds.has(id)) next.add(id); });
-          return next.size === prev.size ? prev : next;
-        });
+      const rawNotifs = data.data || [];
+
+      // Map dataset fields → Notification interface
+      const notifs: Notification[] = rawNotifs.map((n: any) => ({
+        _id: n.notification_id,
+        title: `${n.threat_category || 'Alert'} · ${n.department || ''} via ${n.channel || ''}`,
+        message: n.content || '',
+        severity: (() => {
+          const rs = n.risk_score || 0;
+          const tc = n.threat_category || 'Safe';
+          // Map threat categories to proper NotificationSeverity types
+          if (tc === 'phishing' || tc === 'ransomware' || tc === 'bec') return tc as any;
+          if (tc === 'high_risk_suspicious' || tc === 'critical') return tc as any;
+          if (rs >= 0.8 || n.priority === 'critical') return 'critical' as any;
+          if (rs >= 0.65 || n.priority === 'high') return 'high_risk_suspicious' as any;
+          if (rs >= 0.4 || n.priority === 'medium') return 'suspicious' as any;
+          return 'safe' as any;
+        })(),
+        timestamp: n.timestamp,
+        createdAt: n.timestamp,
+        read: n.review_status !== 'Pending',
+        category: n.channel,
+        risk_level: n.priority,
+        is_flagged: n.is_malicious,
+        ai_explanation: n.ai_explanation,
+        signals: n.signals,
+      }));
+
+      setNotifications(Array.isArray(notifs) ? notifs : []);
+      updateUnreadCount(notifs);
+      setSelectedIds((prev) => {
+        if (prev.size === 0) return prev;
+        const validIds = new Set(notifs.map((n) => n._id));
+        const next = new Set<string>();
+        prev.forEach((id) => { if (validIds.has(id)) next.add(id); });
+        return next.size === prev.size ? prev : next;
+      });
     } catch (err) {
-      console.error("Failed to load notifications:", err);
+      console.error('Failed to load notifications:', err);
     } finally {
       setIsLoading(false);
     }
@@ -213,7 +245,7 @@ export default function NotificationsFeed() {
     try {
       await fetch(`/api/notifications/${id}`, { method: "DELETE" });
       setNotifications((prev) => {
-        const updated = prev.filter((n) => n._id !== id);
+        const updated = Array.isArray(prev) ? prev : [].filter((n) => n._id !== id);
         updateUnreadCount(updated);
         return updated;
       });
@@ -244,16 +276,19 @@ export default function NotificationsFeed() {
       console.log("📢 NotificationsFeed received event:", { type, notification, severity });
 
       if (type === "new" && notification) {
+        const incoming = notification.notification || notification;
         const newNotif: Notification = {
-          _id: notification._id || `temp-${Date.now()}`,
-          title: notification.title || "Alert",
-          message: notification.message || "",
-          severity: severity || notification.severity || "medium",
-          timestamp: notification.timestamp || new Date().toISOString(),
+          _id: incoming.notification_id || incoming._id || `temp-${Date.now()}`,
+          title: incoming.title || incoming.threat_category || "Alert",
+          message: incoming.message || incoming.content || "",
+          severity: severity || incoming.severity || "medium",
+          timestamp: incoming.timestamp || new Date().toISOString(),
+          ai_explanation: incoming.ai_explanation,
+          signals: incoming.signals,
           read: false,
         };
 
-        setNotifications((prev) => [newNotif, ...prev]);
+        setNotifications((prev) => [newNotif, ...prev].slice(0, 20)); // Capped at 20 to prevent DOM bloat
         setUnreadCount((prev) => prev + 1);
       }
     };
@@ -447,6 +482,31 @@ export default function NotificationsFeed() {
                             </span>
                           )}
                         </div>
+
+                        {/* AI Explanation Engine Output */}
+                        {notification.ai_explanation && (
+                          <div className="mt-3 p-2 bg-black/40 border border-white/5 rounded-md">
+                            <div className="flex items-center gap-1.5 mb-1.5">
+                              <Info className="w-3 h-3 text-cyan-400" />
+                              <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-tight">AI Insights</span>
+                            </div>
+                            <p className="text-[11px] text-slate-300 italic leading-snug">
+                              "{notification.ai_explanation}"
+                            </p>
+                            {notification.signals && notification.signals.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-2">
+                                {notification.signals.slice(0, 3).map((sig, i) => (
+                                  <span key={i} className="text-[9px] px-1.5 py-0.5 bg-cyan-900/40 border border-cyan-500/20 text-cyan-300 rounded-sm">
+                                    {sig}
+                                  </span>
+                                ))}
+                                {notification.signals.length > 3 && (
+                                  <span className="text-[9px] text-slate-500">+{notification.signals.length - 3} more</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
                         
                         {/* Threat Pattern Detection */}
                         {(() => {

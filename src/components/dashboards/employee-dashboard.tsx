@@ -1,59 +1,133 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSidebar } from '@/lib/sidebar-context';
+import { useRole } from '@/components/role-provider';
+import { useAuth } from '@/components/auth-provider';
+
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { useRole } from '@/components/role-provider';
-import { Mail, AlertTriangle, CheckCircle, Info, RefreshCw, Shield, MessageSquare, Users, Building, DollarSign, Smartphone, QrCode, Eye, ChevronDown, ChevronUp, TrendingUp } from 'lucide-react';
-import type { Notification, Explanation, SourceApp } from '@/lib/ml-service';
+import { Button } from '@/components/ui/button';
+import api from '@/lib/api';
+
+import {
+  Mail,
+  AlertTriangle,
+  CheckCircle,
+  RefreshCw,
+  Shield,
+  MessageSquare,
+  Users,
+  Building,
+  DollarSign,
+  Smartphone,
+  QrCode,
+  Eye,
+  ChevronDown,
+  ChevronUp,
+  TrendingUp,
+  Search,
+  Clock,
+  Sparkles,
+} from 'lucide-react';
+
+import type {
+  DatasetNotification,
+} from '@/lib/types';
+
 import { ScannerTools } from '@/components/scanner-tools';
-import { calculateSecurityScore, formatSecurityScore } from '@/lib/security-score';
-import { 
-  useNotificationBulkSelect, 
-  SelectAllNotSafeBar, 
-  BulkActionBar, 
+
+import {
+  calculateSecurityScore,
+  formatSecurityScore,
+} from '@/lib/security-score';
+
+import {
+  useNotificationBulkSelect,
+  SelectAllNotSafeBar,
+  BulkActionBar,
   BulkFeedbackToast,
   NotificationCheckbox,
-  isNotSafe
+  isNotSafe,
 } from '@/components/notification-bulk-actions';
 
-const sourceAppIcons: Record<SourceApp, React.ReactNode> = {
-  'Email': <Mail className="w-4 h-4" />,
-  'Slack': <MessageSquare className="w-4 h-4" />,
+/* -------------------------------------------------------------------------- */
+/*                                   MAPPINGS                                 */
+/* -------------------------------------------------------------------------- */
+
+const sourceAppIcons: Record<string, React.ReactNode> = {
+  Email: <Mail className="w-4 h-4" />,
+  Slack: <MessageSquare className="w-4 h-4" />,
   'Microsoft Teams': <Users className="w-4 h-4" />,
   'HR Portal': <Building className="w-4 h-4" />,
   'Finance System': <DollarSign className="w-4 h-4" />,
   'Internal Mobile App': <Smartphone className="w-4 h-4" />,
 };
 
-const sourceAppColors: Record<SourceApp, string> = {
-  'Email': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  'Slack': 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-  'Microsoft Teams': 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30',
-  'HR Portal': 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-  'Finance System': 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-  'Internal Mobile App': 'bg-pink-500/20 text-pink-400 border-pink-500/30',
+const sourceAppColors: Record<string, string> = {
+  Email: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+  Slack: 'bg-violet-500/15 text-violet-400 border-violet-500/30',
+  'Microsoft Teams': 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30',
+  'HR Portal': 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+  'Finance System': 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+  'Internal Mobile App': 'bg-pink-500/15 text-pink-400 border-pink-500/30',
 };
+
+/* -------------------------------------------------------------------------- */
+/*                              MAIN COMPONENT                                */
+/* -------------------------------------------------------------------------- */
 
 export function EmployeeDashboard() {
   const { orgId } = useRole();
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const { user } = useAuth();
+  const { activeTab: sidebarTab, setActiveTab: setSidebarTab } = useSidebar();
+
+  const activeTab =
+    (sidebarTab as 'notifications' | 'scanners') || 'notifications';
+
+  const setActiveTab = (tab: 'notifications' | 'scanners') =>
+    setSidebarTab(tab);
+
+  const [notifications, setNotifications] = useState<DatasetNotification[]>([]);
+  const [stats, setStats] = useState({
+    totalNotifications: 0,
+    safe: 0,
+    suspicious: 0,
+    malicious: 0,
+    notSafe: 0,
+  });
   const [userFeedback, setUserFeedback] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedExplanation, setSelectedExplanation] = useState<{ [key: string]: Explanation }>({});
-  const [activeTab, setActiveTab] = useState<'notifications' | 'scanners'>('notifications');
-  const [bulkMode, setBulkMode] = useState(false);
-  const [safeSectionCollapsed, setSafeSectionCollapsed] = useState(true);
 
-  // Calculate security score
-  const securityScore = calculateSecurityScore(notifications, userFeedback);
-  const formattedScore = formatSecurityScore(securityScore.score);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [safeCollapsed, setSafeCollapsed] = useState(true);
+
+  const [search, setSearch] = useState('');
+  const [riskFilter, setRiskFilter] = useState<
+    'all' | 'high' | 'medium' | 'low'
+  >('all');
+
+  const [selectedExplanation, setSelectedExplanation] = useState<{
+    [key: string]: any;
+  }>({});
+
+  /* ---------------------------- SECURITY SCORE ---------------------------- */
+
+  const securityScore = calculateSecurityScore(
+    notifications,
+    userFeedback
+  );
+
+  const formattedScore = formatSecurityScore(
+    securityScore.score
+  );
+
+  /* ----------------------------- BULK ACTIONS ---------------------------- */
 
   const {
     selectedIds,
     notSafeCount,
     allNotSafeSelected,
-    someSelected,
     toggleSelect,
     selectAllNotSafe,
     deselectAll,
@@ -61,159 +135,342 @@ export function EmployeeDashboard() {
     feedback: bulkFeedback,
   } = useNotificationBulkSelect(notifications);
 
-  const toggleBulkMode = () => {
-    setBulkMode(!bulkMode);
-    deselectAll();
-  };
+  /* ------------------------------ FETCH DATA ----------------------------- */
 
   useEffect(() => {
     fetchNotifications();
-  }, [orgId]);
+  }, [orgId, user?.email]);
 
   const fetchNotifications = async () => {
     setLoading(true);
-    const res = await fetch(`/api/notifications?org_id=${orgId}`);
-    const data = await res.json();
-    setNotifications(data.notifications.slice(0, 10));
-    setLoading(false);
+
+    try {
+      const dashboardRes = await api.get<any>(`/api/dashboards/employee?org_id=${orgId ?? 'unknown'}${user?.email ? `&email=${encodeURIComponent(user.email)}` : ''}`);
+
+      const dashboardData = dashboardRes?.data ?? dashboardRes;
+      const notificationsData = Array.isArray(dashboardData?.notifications) ? dashboardData.notifications : [];
+      console.debug('[employee-dashboard] raw dashboard response', dashboardRes);
+      console.debug('[employee-dashboard] mapped counts', {
+        total: dashboardData?.stats?.totalNotifications,
+        safe: dashboardData?.stats?.safe,
+        suspicious: dashboardData?.stats?.suspicious,
+        malicious: dashboardData?.stats?.malicious,
+        notifications: notificationsData.length,
+      });
+      setNotifications(notificationsData);
+      setStats({
+        totalNotifications: dashboardData?.stats?.totalNotifications || notificationsData.length,
+        safe: dashboardData?.stats?.safe || 0,
+        suspicious: dashboardData?.stats?.suspicious || 0,
+        malicious: dashboardData?.stats?.malicious || 0,
+        notSafe: dashboardData?.stats?.notSafe || ((dashboardData?.stats?.suspicious || 0) + (dashboardData?.stats?.malicious || 0)),
+      });
+      
+      // Set user feedback if available from dashboard
+      if (dashboardData?.data?.user_feedback) {
+        setUserFeedback(dashboardData.data.user_feedback);
+      }
+    } catch (e) {
+      console.error('Employee dashboard fetch error:', e);
+      setNotifications([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const fetchExplanation = async (notificationId: string) => {
-    if (selectedExplanation[notificationId]) return;
-    
-    const res = await fetch(`/api/explain/${notificationId}`);
-    const data = await res.json();
-    setSelectedExplanation(prev => ({ ...prev, [notificationId]: data }));
+  const fetchExplanation = async (id: string) => {
+    if (!id || selectedExplanation?.[id]) return;
+
+    try {
+      const res = await api.get(`/api/explain/${id}`);
+      const data = (res as any).data;
+
+      setSelectedExplanation((prev) => ({
+        ...prev,
+        [id]: data,
+      }));
+    } catch (e) {
+      console.error(e);
+    }
   };
+
+  /* ------------------------------ FILTERING ------------------------------ */
+
+  const filteredNotifications = useMemo(() => {
+    let items = Array.isArray(notifications) ? [...notifications] : [];
+
+    if (search.trim()) {
+      const q = search.toLowerCase();
+
+      items = items.filter(
+        (n) =>
+          (n?.content ?? '').toLowerCase().includes(q) ||
+          (n?.sender ?? '').toLowerCase().includes(q) ||
+          (n?.department ?? '').toLowerCase().includes(q) ||
+          (n?.channel ?? '').toLowerCase().includes(q)
+      );
+    }
+
+    if (riskFilter !== 'all') {
+      items = items.filter((n) => {
+        const score = Number(n?.risk_score ?? 0);
+        if (riskFilter === 'high') return score >= 0.75;
+        if (riskFilter === 'medium') return score >= 0.45 && score < 0.75;
+        return score < 0.45;
+      });
+    }
+
+    return items;
+  }, [notifications, search, riskFilter]);
+
+  const unsafeNotifications =
+    (filteredNotifications ?? []).filter(isNotSafe);
+
+  const safeNotifications =
+    (filteredNotifications ?? []).filter(
+      (n) => !isNotSafe(n)
+    );
+
+  /* ------------------------------- LOADING ------------------------------- */
 
   if (loading) {
-    return <div className="flex items-center justify-center h-64"><RefreshCw className="w-8 h-8 animate-spin text-cyan-500" /></div>;
+    return (
+      <div className="h-72 flex items-center justify-center">
+        <RefreshCw className="w-8 h-8 animate-spin text-cyan-500" />
+      </div>
+    );
   }
+
+  /* ---------------------------------------------------------------------- */
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* HEADER */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-foreground">My Notifications</h2>
-          <p className="text-muted-foreground">View your notifications and their security analysis</p>
+          <h1 className="text-3xl font-bold tracking-tight">
+            Employee Dashboard
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            Review notifications, risks, and scan
+            suspicious links or QR codes.
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          {activeTab === 'notifications' && (
-            <>
-              <button
-                onClick={toggleBulkMode}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-1.5 ${
-                  bulkMode 
-                    ? 'bg-cyan-600 text-white' 
-                    : 'border border-slate-700 text-slate-300 hover:border-cyan-500/50 hover:bg-cyan-500/10'
-                }`}
-              >
-                <AlertTriangle className="w-3.5 h-3.5" />
-                Bulk Mode
-              </button>
-              <Badge variant="outline" className="text-red-500 border-red-500">
-                {notSafeCount} Not Safe
-              </Badge>
-            </>
-          )}
-        </div>
+
+        {activeTab === 'notifications' && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge
+              variant="outline"
+              className="text-red-500 border-red-500"
+            >
+              {notSafeCount ?? 0} Not Safe
+            </Badge>
+
+            <Button
+              variant={
+                bulkMode ? 'default' : 'outline'
+              }
+              onClick={() => {
+                setBulkMode(!bulkMode);
+                deselectAll();
+              }}
+            >
+              Bulk Mode
+            </Button>
+
+            <Button
+              variant="outline"
+              onClick={fetchNotifications}
+            >
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Refresh
+            </Button>
+          </div>
+        )}
       </div>
 
+      {/* TABS */}
       <div className="flex gap-2 border-b border-border">
         <button
-          onClick={() => setActiveTab('notifications')}
-          className={`px-4 py-2 font-medium transition-colors flex items-center gap-2 ${
-            activeTab === 'notifications' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-muted-foreground hover:text-foreground'
+          onClick={() =>
+            setActiveTab('notifications')
+          }
+          className={`px-4 py-3 text-sm font-medium transition ${
+            activeTab === 'notifications'
+              ? 'border-b-2 border-cyan-500 text-cyan-400'
+              : 'text-muted-foreground hover:text-foreground'
           }`}
         >
-          <Eye className="w-4 h-4" />
-          Notifications
+          <span className="inline-flex items-center gap-2">
+            <Eye className="w-4 h-4" />
+            Notifications
+          </span>
         </button>
+
         <button
           onClick={() => setActiveTab('scanners')}
-          className={`px-4 py-2 font-medium transition-colors flex items-center gap-2 ${
-            activeTab === 'scanners' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-muted-foreground hover:text-foreground'
+          className={`px-4 py-3 text-sm font-medium transition ${
+            activeTab === 'scanners'
+              ? 'border-b-2 border-cyan-500 text-cyan-400'
+              : 'text-muted-foreground hover:text-foreground'
           }`}
         >
-          <QrCode className="w-4 h-4" />
-          Scanners
+          <span className="inline-flex items-center gap-2">
+            <QrCode className="w-4 h-4" />
+            Scanners
+          </span>
         </button>
       </div>
 
-      {activeTab === 'scanners' && <ScannerTools />}
+      {/* SCANNERS */}
+      {activeTab === 'scanners' && (
+        <ScannerTools />
+      )}
 
+      {/* NOTIFICATIONS */}
       {activeTab === 'notifications' && (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <Card className="bg-card border-border">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Total Notifications</p>
-                    <p className="text-3xl font-bold text-foreground">{notifications.length}</p>
-                  </div>
-                  <Mail className="w-10 h-10 text-cyan-500" />
-                </div>
-              </CardContent>
-            </Card>
+          {/* KPI CARDS */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+            <MetricCard
+              title="Total Notifications"
+              value={stats.totalNotifications}
+              icon={<Mail className="w-8 h-8 text-cyan-400" />}
+            />
 
-            <Card className="bg-card border-border">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Safe</p>
-                    <p className="text-3xl font-bold text-green-500">{notifications.length - notSafeCount}</p>
-                  </div>
-                  <CheckCircle className="w-10 h-10 text-green-500" />
-                </div>
-              </CardContent>
-            </Card>
+            <MetricCard
+              title="Safe"
+              value={stats.safe}
+              icon={
+                <CheckCircle className="w-8 h-8 text-green-500" />
+              }
+            />
 
-            <Card className="bg-card border-border">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Not Safe</p>
-                    <p className="text-3xl font-bold text-red-500">{notSafeCount}</p>
-                  </div>
-                  <AlertTriangle className="w-10 h-10 text-red-500" />
-                </div>
-              </CardContent>
-            </Card>
+            <MetricCard
+              title="Suspicious"
+              value={stats.suspicious}
+              icon={
+                <AlertTriangle className="w-8 h-8 text-amber-500" />
+              }
+            />
 
-            <Card className={`bg-card border-border ${formattedScore.bgColor} ${formattedScore.borderColor}`}>
+            <MetricCard
+              title="Not Safe"
+              value={stats.notSafe}
+              icon={
+                <AlertTriangle className="w-8 h-8 text-red-500" />
+              }
+            />
+
+            <Card
+              className={`border ${formattedScore?.borderColor ?? ''} ${formattedScore?.bgColor ?? ''}`}
+            >
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-muted-foreground">Security Score</p>
-                    <p className={`text-3xl font-bold ${formattedScore.color}`}>
-                      {formattedScore.display}
+                    <p className="text-sm text-muted-foreground">
+                      Security Score
                     </p>
-                    <div className="flex items-center gap-1 mt-1">
-                      <TrendingUp className="w-3 h-3 text-green-500" />
-                      <span className="text-xs text-muted-foreground">
-                        {securityScore.grade === 'excellent' ? 'Excellent' : 
-                         securityScore.grade === 'good' ? 'Good' : 'Needs Improvement'}
-                      </span>
+                    <p
+                      className={`text-3xl font-bold ${formattedScore?.color ?? ''}`}
+                    >
+                      {formattedScore?.display ?? 'N/A'}
+                    </p>
+                    <div className="mt-1 text-xs text-muted-foreground flex items-center gap-1">
+                      <TrendingUp className="w-3 h-3" />
+                      Personal safety posture
                     </div>
                   </div>
-                  <Shield className={`w-10 h-10 ${formattedScore.color}`} />
+
+                  <Shield
+                    className={`w-8 h-8 ${formattedScore?.color ?? ''}`}
+                  />
                 </div>
               </CardContent>
             </Card>
           </div>
 
-          <BulkFeedbackToast message={bulkFeedback} />
-          
+          {/* QUICK ACTIONS */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
+            <Button variant="outline" className="h-20 flex flex-col gap-2 border-cyan-500/30 hover:bg-cyan-500/10" onClick={() => setActiveTab('scanners')}>
+              <AlertTriangle className="w-5 h-5 text-red-500" />
+              <span className="text-xs">Report Phishing</span>
+            </Button>
+            <Button variant="outline" className="h-20 flex flex-col gap-2 border-cyan-500/30 hover:bg-cyan-500/10" onClick={() => setActiveTab('scanners')}>
+              <Smartphone className="w-5 h-5 text-cyan-500" />
+              <span className="text-xs">Scan Link</span>
+            </Button>
+            <Button variant="outline" className="h-20 flex flex-col gap-2 border-cyan-500/30 hover:bg-cyan-500/10" onClick={() => setActiveTab('scanners')}>
+              <QrCode className="w-5 h-5 text-indigo-500" />
+              <span className="text-xs">Check QR</span>
+            </Button>
+            <Button variant="outline" className="h-20 flex flex-col gap-2 border-cyan-500/30 hover:bg-cyan-500/10" onClick={() => window.open('/training', '_blank')}>
+              <Shield className="w-5 h-5 text-green-500" />
+              <span className="text-xs">View Training Tips</span>
+            </Button>
+          </div>
+
+          {/* SEARCH / FILTER */}
+          <Card className="mt-6">
+            <CardContent className="pt-6">
+              <div className="grid md:grid-cols-3 gap-3">
+                <div className="relative md:col-span-2">
+                  <Search className="w-4 h-4 absolute left-3 top-3 text-muted-foreground" />
+                  <input
+                    value={search}
+                    onChange={(e) =>
+                      setSearch(e.target.value)
+                    }
+                    placeholder="Search sender, content, department..."
+                    className="w-full h-10 rounded-md border bg-background pl-9 pr-3 text-sm"
+                  />
+                </div>
+
+                <select
+                  value={riskFilter}
+                  onChange={(e) =>
+                    setRiskFilter(
+                      e.target.value as any
+                    )
+                  }
+                  className="h-10 rounded-md border bg-background px-3 text-sm"
+                >
+                  <option value="all">
+                    All Risks
+                  </option>
+                  <option value="high">
+                    High Risk
+                  </option>
+                  <option value="medium">
+                    Medium Risk
+                  </option>
+                  <option value="low">
+                    Low Risk
+                  </option>
+                </select>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* BULK UI */}
+          <BulkFeedbackToast
+            message={bulkFeedback}
+          />
+
           {bulkMode && (
             <>
-              <SelectAllNotSafeBar 
-                allNotSafeSelected={allNotSafeSelected}
+              <SelectAllNotSafeBar
+                allNotSafeSelected={
+                  allNotSafeSelected
+                }
                 notSafeCount={notSafeCount}
                 onToggle={selectAllNotSafe}
               />
-              <BulkActionBar 
-                selectedCount={selectedIds.size}
+
+              <BulkActionBar
+                selectedCount={
+                  selectedIds.size
+                }
                 role="employee"
                 onAction={handleBulkAction}
                 onClear={deselectAll}
@@ -221,93 +478,204 @@ export function EmployeeDashboard() {
             </>
           )}
 
-          <div className="space-y-6">
-            {/* Not Safe Section */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-red-400 flex items-center gap-2">
-                  <AlertTriangle className="w-5 h-5" />
-                  Not Safe Notifications ({notSafeCount})
-                </h3>
-              </div>
-              
-              {notifications.filter(isNotSafe).length === 0 ? (
-                <Card className="bg-card border-border">
-                  <CardContent className="py-8 text-center">
-                    <CheckCircle className="w-12 h-12 mx-auto text-green-500 mb-3" />
-                    <p className="text-foreground">No not-safe notifications</p>
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {(Array.isArray(notifications) ? notifications.filter(isNotSafe) : []).slice(0, 200).map((notification) => (
-                    <NotificationCard 
-                      key={notification.notification_id}
-                      notification={notification}
-                      bulkMode={bulkMode}
-                      selectedIds={selectedIds}
-                      toggleSelect={toggleSelect}
-                      sourceAppIcons={sourceAppIcons}
-                      sourceAppColors={sourceAppColors}
-                      selectedExplanation={selectedExplanation}
-                      fetchExplanation={fetchExplanation}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
+          {/* UNSAFE */}
+          <SectionTitle
+            title={`Not Safe Notifications (${unsafeNotifications?.length ?? 0})`}
+            danger
+          />
 
-            {/* Safe Section */}
+          {(unsafeNotifications?.length ?? 0) === 0 ? (
+            <EmptyState
+              icon={
+                <CheckCircle className="w-10 h-10 text-green-500" />
+              }
+              text="No unsafe notifications found."
+            />
+          ) : (
             <div className="space-y-3">
-              <button
-                onClick={() => setSafeSectionCollapsed(!safeSectionCollapsed)}
-                className="flex items-center justify-between w-full text-left group"
-              >
-                <h3 className="text-lg font-semibold text-green-400 flex items-center gap-2">
-                  <CheckCircle className="w-5 h-5" />
-                  Safe Notifications ({notifications.length - notSafeCount})
-                </h3>
-                {safeSectionCollapsed ? (
-                  <ChevronDown className="w-4 h-4 text-muted-foreground group-hover:text-foreground" />
-                ) : (
-                  <ChevronUp className="w-4 h-4 text-muted-foreground group-hover:text-foreground" />
-                )}
-              </button>
-              
-              {!safeSectionCollapsed && (
-                <div className="flex flex-col gap-3">
-                  {notifications.filter(n => !isNotSafe(n)).slice(0, 200).map((notification) => (
-                    <NotificationCard 
-                      key={notification.notification_id}
-                      notification={notification}
-                      bulkMode={false}
-                      selectedIds={new Set()}
-                      toggleSelect={() => {}}
-                      sourceAppIcons={sourceAppIcons}
-                      sourceAppColors={sourceAppColors}
-                      selectedExplanation={selectedExplanation}
-                      fetchExplanation={fetchExplanation}
-                    />
-                  ))}
-                </div>
+              {unsafeNotifications.map(
+                (notification) => (
+                  <NotificationCard
+                    key={
+                      notification?.notification_id ?? Math.random().toString()
+                    }
+                    notification={
+                      notification
+                    }
+                    bulkMode={bulkMode}
+                    selectedIds={
+                      selectedIds
+                    }
+                    toggleSelect={
+                      toggleSelect
+                    }
+                    selectedExplanation={
+                      selectedExplanation
+                    }
+                    fetchExplanation={
+                      fetchExplanation
+                    }
+                    refresh={fetchNotifications}
+                  />
+                )
               )}
             </div>
-          </div>
+          )}
+
+          {/* SAFE */}
+          <button
+            onClick={() =>
+              setSafeCollapsed(
+                !safeCollapsed
+              )
+            }
+            className="w-full flex items-center justify-between"
+          >
+            <SectionTitle
+              title={`Safe Notifications (${safeNotifications?.length ?? 0})`}
+              success
+            />
+
+            {safeCollapsed ? (
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            ) : (
+              <ChevronUp className="w-4 h-4 text-muted-foreground" />
+            )}
+          </button>
+
+          {!safeCollapsed && (
+            <div className="space-y-3">
+              {(safeNotifications ?? []).map(
+                (notification) => (
+                  <NotificationCard
+                    key={
+                      notification?.notification_id ?? Math.random().toString()
+                    }
+                    notification={
+                      notification
+                    }
+                    bulkMode={false}
+                    selectedIds={
+                      new Set()
+                    }
+                    toggleSelect={() => {}}
+                    selectedExplanation={
+                      selectedExplanation
+                    }
+                    fetchExplanation={
+                      fetchExplanation
+                    }
+                    refresh={fetchNotifications}
+                  />
+                )
+              )}
+            </div>
+          )}
         </>
       )}
     </div>
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/*                             SUPPORT COMPONENTS                             */
+/* -------------------------------------------------------------------------- */
+
+function MetricCard({
+  title,
+  value,
+  icon,
+}: {
+  title: string;
+  value: number;
+  icon: React.ReactNode;
+}) {
+  return (
+    <Card>
+      <CardContent className="pt-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm text-muted-foreground">
+              {title}
+            </p>
+            <p className="text-3xl font-bold">
+              {value}
+            </p>
+          </div>
+          {icon}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SectionTitle({
+  title,
+  danger,
+  success,
+}: {
+  title: string;
+  danger?: boolean;
+  success?: boolean;
+}) {
+  return (
+    <h3
+      className={`text-lg font-semibold flex items-center gap-2 ${
+        danger
+          ? 'text-red-400'
+          : success
+          ? 'text-green-400'
+          : ''
+      }`}
+    >
+      {danger ? (
+        <AlertTriangle className="w-5 h-5" />
+      ) : success ? (
+        <CheckCircle className="w-5 h-5" />
+      ) : null}
+
+      {title}
+    </h3>
+  );
+}
+
+function EmptyState({
+  icon,
+  text,
+}: {
+  icon: React.ReactNode;
+  text: string;
+}) {
+  return (
+    <Card>
+      <CardContent className="py-10 text-center">
+        <div className="flex justify-center mb-3">
+          {icon}
+        </div>
+        <p className="text-muted-foreground">
+          {text}
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                            NOTIFICATION CARD                               */
+/* -------------------------------------------------------------------------- */
+
 interface NotificationCardProps {
-  notification: Notification;
+  notification: DatasetNotification;
   bulkMode: boolean;
   selectedIds: Set<string>;
   toggleSelect: (id: string) => void;
-  sourceAppIcons: Record<SourceApp, React.ReactNode>;
-  sourceAppColors: Record<SourceApp, string>;
-  selectedExplanation: { [key: string]: Explanation };
-  fetchExplanation: (id: string) => void;
+  selectedExplanation: {
+    [key: string]: any;
+  };
+  fetchExplanation: (
+    id: string
+  ) => Promise<void>;
+  refresh: () => Promise<void>;
 }
 
 function NotificationCard({
@@ -315,113 +683,162 @@ function NotificationCard({
   bulkMode,
   selectedIds,
   toggleSelect,
-  sourceAppIcons,
-  sourceAppColors,
   selectedExplanation,
   fetchExplanation,
+  refresh,
 }: NotificationCardProps) {
   const notSafe = isNotSafe(notification);
-  
+
+  const riskColor =
+    notification?.threat_category === 'high_risk_suspicious' || notification?.threat_category === 'ransomware' || notification?.threat_category === 'phishing' || notification?.threat_category === 'critical'
+      ? 'text-red-400'
+      : notification?.threat_category === 'suspicious' || notification?.threat_category === 'bec'
+      ? 'text-amber-400'
+      : 'text-green-400';
+
   return (
-    <div className={`bg-card border border-border hover:border-muted-foreground/30 transition-colors p-4 rounded-lg ${
-      notSafe ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-green-500'
-    }`}>
-      <div className="flex items-start gap-3">
-        {bulkMode && (
-          <NotificationCheckbox
-            notification={notification}
-            isSelected={selectedIds.has(notification.notification_id)}
-            onToggle={toggleSelect}
-          />
-        )}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-4 mb-3">
-            <div className="flex items-center gap-3 flex-wrap">
-              {notSafe ? (
-                <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
-              ) : (
-                <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0" />
-              )}
-              <span className="font-mono text-sm text-muted-foreground">{notification.notification_id}</span>
-              <Badge className={`${sourceAppColors[notification.source_app]} flex items-center gap-1`}>
-                {sourceAppIcons[notification.source_app]}
-                {notification.source_app}
-              </Badge>
-              <Badge className={
-                notification.risk_level === 'High' ? 'bg-red-500/20 text-red-400' :
-                notification.risk_level === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' :
-                'bg-green-500/20 text-green-400'
-              }>
-                {notification.risk_level} ({Math.round(notification.risk_score * 100)}%)
-              </Badge>
-              <Badge variant="outline" className="text-muted-foreground">{notification.department}</Badge>
-              {notSafe && (
-                <Badge className="bg-red-500/20 text-red-400">
-                  Not Safe
-                </Badge>
-              )}
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <Shield className={`w-4 h-4 ${
-                notification.risk_level === 'High' ? 'text-red-500' :
-                notification.risk_level === 'Medium' ? 'text-yellow-500' : 'text-green-500'
-              }`} />
-              <span className={`text-sm font-medium ${
-                notification.risk_level === 'High' ? 'text-red-500' :
-                notification.risk_level === 'Medium' ? 'text-yellow-500' : 'text-green-500'
-              }`}>
-                {Math.round(notification.risk_score * 100)}% Risk
-              </span>
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-3 gap-4 text-sm mb-3">
-            <div>
-              <span className="text-muted-foreground">From: </span>
-              <span className="text-foreground">{notification.sender}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Department: </span>
-              <span className="text-foreground">{notification.department}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Source: </span>
-              <span className="text-foreground">{notification.source_app}</span>
-            </div>
-          </div>
-          <p className="text-foreground bg-muted p-3 rounded-lg text-sm line-clamp-2 mb-2">{notification.content}</p>
-          
-          {notSafe && (
-            <div className="mt-3">
-              <button
-                onClick={() => fetchExplanation(notification.notification_id)}
-                className="text-cyan-400 hover:text-cyan-300 text-sm flex items-center gap-1"
-              >
-                <Info className="w-4 h-4" />
-                Why was this flagged?
-              </button>
-              
-              {selectedExplanation[notification.notification_id] && (
-                <div className="mt-3 bg-cyan-900/20 border border-cyan-800 p-4 rounded-lg">
-                  <p className="text-foreground text-sm mb-2">
-                    {selectedExplanation[notification.notification_id].explanation.explanation_text}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedExplanation[notification.notification_id].explanation.top_features.map((feature, idx) => (
-                      <Badge key={idx} className="bg-cyan-500/20 text-cyan-400 text-xs">
-                        {feature.feature.replace(/_/g, ' ')}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+    <Card
+      className={`overflow-hidden border-l-4 ${
+        notSafe
+          ? 'border-l-red-500'
+          : 'border-l-green-500'
+      }`}
+    >
+      <CardContent className="pt-5">
+        <div className="flex gap-3">
+          {bulkMode && (
+            <NotificationCheckbox
+              notification={notification}
+              isSelected={selectedIds?.has(notification?.notification_id) ?? false}
+              onToggle={toggleSelect}
+            />
           )}
-          
-          <p className="text-xs text-muted-foreground">{notification.timestamp}</p>
+
+          <div className="flex-1 min-w-0">
+            {/* TOP */}
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              {notSafe ? (
+                <AlertTriangle className="w-4 h-4 text-red-500" />
+              ) : (
+                <CheckCircle className="w-4 h-4 text-green-500" />
+              )}
+              <span className="font-mono text-xs text-muted-foreground">
+                {notification?.notification_id ?? 'N/A'}
+              </span>
+              <Badge
+                className={sourceAppColors[notification?.channel ?? ''] ?? 'bg-gray-500/15'}
+              >
+                <span className="mr-1">
+                  {sourceAppIcons[notification?.channel ?? ''] ?? <Shield className="w-4 h-4" />}
+                </span>
+                {notification?.channel ?? 'Unknown Channel'}
+              </Badge>
+              <Badge>
+                {notification?.threat_category ?? 'Unknown Risk'} ({Math.round((notification?.risk_score ?? 0) * 100)}%)
+              </Badge>
+              <Badge variant="outline">
+                {notification?.department ?? 'Unknown Department'}
+              </Badge>
+            </div>
+            {/* META */}
+            <div className="grid md:grid-cols-3 gap-2 text-sm mb-3">
+              <div>
+                <span className="text-muted-foreground">
+                  From:
+                </span>{' '}
+                {notification?.sender ?? 'Unknown Sender'}
+              </div>
+              <div>
+                <span className="text-muted-foreground">
+                  To:
+                </span>{' '}
+                {notification?.receiver ?? 'Unknown Receiver'}
+              </div>
+              <div className="flex items-center gap-1 text-muted-foreground">
+                <Clock className="w-3 h-3" />
+                {notification?.timestamp ?? 'Unknown Time'}
+              </div>
+            </div>
+            {/* CONTENT */}
+            <div className="rounded-lg border bg-muted/40 p-3 text-sm">
+              {notification?.content ?? 'No content available.'}
+            </div>
+            {/* EXPLANATION */}
+            {notSafe && (
+              <div className="mt-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="px-0 text-cyan-400 hover:text-cyan-300"
+                  onClick={() => fetchExplanation?.(notification?.notification_id ?? '')}
+                >
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  Why was this flagged?
+                </Button>
+                {notification?.notification_id && selectedExplanation?.[notification.notification_id] && (
+                  <div className="mt-3 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-4">
+                    <p className="text-sm border-b border-cyan-500/20 pb-2 mb-2">
+                       <span className="font-semibold text-cyan-400">AI Explanation:</span> {selectedExplanation[notification.notification_id]?.explanation?.explanation_text ?? "Reason unavailable"}
+                    </p>
+                    <p className="text-sm">
+                       <span className="font-semibold text-cyan-400">Recommended Action:</span> Do not interact. Report this to security immediately.
+                    </p>
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {(selectedExplanation[notification.notification_id]?.explanation?.top_features ?? []).map((feature: any, idx: number) => (
+                        <Badge
+                          key={idx}
+                          variant="outline"
+                          className="text-cyan-400 border-cyan-500/30"
+                        >
+                          {feature?.feature?.replace(/_/g, ' ') ?? 'Unknown Indicator'}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  await api.delete(`/api/notifications/${notification.notification_id}`);
+                  await refresh();
+                }}
+              >
+                Delete
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  await api.post('/api/fraud-analyst/request-review', {
+                    notificationId: notification.notification_id,
+                    feedback: 'Reported by employee for analyst review',
+                  });
+                  await refresh();
+                }}
+              >
+                Report
+              </Button>
+              <Button
+                size="sm"
+                onClick={async () => {
+                  await api.post('/api/fraud-analyst/request-review', {
+                    notificationId: notification.notification_id,
+                    feedback: 'Employee requested manual review',
+                  });
+                  await refresh();
+                }}
+              >
+                Request Review
+              </Button>
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }

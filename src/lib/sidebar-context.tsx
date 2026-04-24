@@ -1,0 +1,50 @@
+'use client';
+
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+
+interface SidebarContextType {
+  activeTab: string;
+  setActiveTab: (tab: string) => void;
+  collapsed: boolean;
+  setCollapsed: (v: boolean) => void;
+  mobileOpen: boolean;
+  setMobileOpen: (v: boolean) => void;
+}
+
+const SidebarContext = createContext<SidebarContextType | undefined>(undefined);
+
+export function SidebarProvider({ children }: { children: ReactNode }) {
+  const [activeTab, setActiveTab] = useState('');
+  const [collapsed, setCollapsedState] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('argus-sidebar-collapsed');
+      if (stored !== null) setCollapsedState(stored === 'true');
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const setCollapsed = (v: boolean) => {
+    setCollapsedState(v);
+    try {
+      localStorage.setItem('argus-sidebar-collapsed', String(v));
+    } catch {
+      // ignore
+    }
+  };
+
+  return (
+    <SidebarContext.Provider value={{ activeTab, setActiveTab, collapsed, setCollapsed, mobileOpen, setMobileOpen }}>
+      {children}
+    </SidebarContext.Provider>
+  );
+}
+
+export function useSidebar() {
+  const ctx = useContext(SidebarContext);
+  if (!ctx) throw new Error('useSidebar must be used within SidebarProvider');
+  return ctx;
+}

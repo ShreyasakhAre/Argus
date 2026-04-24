@@ -1,16 +1,16 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { io } from 'socket.io-client';
-import { Bell, AlertTriangle, Shield, Zap, CheckCircle, X, Clock } from 'lucide-react';
+import { io, Socket } from 'socket.io-client';
+import { Bell, AlertTriangle, Shield, Zap, CheckCircle, Clock, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SeverityBadge, SeverityIndicator } from '@/components/ui/severity-badge';
 import { PremiumCard, PremiumCardHeader, PremiumCardTitle, PremiumCardContent } from '@/components/ui/premium-card';
-import type { Alert } from '@/lib/alert-types';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import api from '@/lib/api';
 
 interface AlertPanelProps {
   maxAlerts?: number;
-  showAll?: boolean;
 }
 
 const severityConfig = {
@@ -18,148 +18,139 @@ const severityConfig = {
   high: { icon: Zap, color: 'text-orange-400', bgColor: 'bg-orange-500/20' },
   medium: { icon: Shield, color: 'text-yellow-400', bgColor: 'bg-yellow-500/20' },
   low: { icon: Bell, color: 'text-blue-400', bgColor: 'bg-blue-500/20' },
+  safe: { icon: Shield, color: 'text-green-400', bgColor: 'bg-green-500/20' },
 };
 
-export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) {
-  const [liveAlerts, setLiveAlerts] = useState<any[]>([]); // Using any[] to safely handle direct socket payload
+function getSeverityConfig(severity: string) {
+  const key = (severity || 'low').toLowerCase();
+  return (severityConfig as any)[key] || severityConfig.low;
+}
+
+export function AlertPanel({ maxAlerts = 20 }: AlertPanelProps) {
+  const [liveAlerts, setLiveAlerts] = useState<any[]>([]);
   const [unacknowledged, setUnacknowledged] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [socketStatus, setSocketStatus] = useState("Disconnected");
-  const [apiStatus, setApiStatus] = useState("Connected");
-  const handlerRef = useRef<((e: Event) => void) | null>(null);
+  const [socketStatus, setSocketStatus] = useState('Disconnected');
+  const socketRef = useRef<Socket | null>(null);
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/alerts` || "https://argus-backend.onrender.com/api/alerts";
-  
-  const fetchAlerts = useCallback(async () => {
-    if (!showAll) {
-      // LIVE ALERTS MODE: Do not fetch historical data. Rely purely on Socket.io stream.
-      setLoading(false);
-      return;
-    }
-    
+  // ── Load initial alerts from backend dataset ──────────────────────────────
+  const loadInitialAlerts = useCallback(async () => {
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
-      const res = await fetch(`${API_URL}${showAll ? '' : '?acknowledged=false'}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      
-      if (!res.ok) throw new Error('Backend API fetch failed');
-      
-      const data = await res.json();
-      console.log("Frontend API Data:", data);
-      console.log("🟢 Data Source: API (Fetch Success)");
-      setApiStatus("Connected");
-      
-      // Ensure data compatibility matching previous JSON shape cleanly
-      const alertsArray = data.alerts || data.data?.alerts || [];
-      const criticalAlerts = alertsArray.filter((alert: any) => alert.severity === 'critical');
-      
-      setLiveAlerts(criticalAlerts.slice(0, showAll ? undefined : maxAlerts));
-      setUnacknowledged(data.unacknowledged || 0);
-      setLoading(false);
+      const data = await api.get<{ success: boolean; data: any[] }>(
+        `/api/alerts?limit=${maxAlerts}&page=1&sortBy=risk_score&sortOrder=desc`
+      );
+      if (data.success) {
+        setLiveAlerts(data.data || []);
+        setUnacknowledged(
+          (data.data || []).filter((a: any) => a.review_status === 'Pending').length
+        );
+      }
     } catch (err) {
-      console.error('🔴 Failed to fetch from Backend API. No local fallback used.', err);
+      console.error('[AlertPanel] Failed to load initial alerts:', err);
+    } finally {
       setLoading(false);
     }
-  }, [showAll, maxAlerts]);
+  }, [maxAlerts]);
 
-  const acknowledgeAlert = useCallback(async (alertId: string) => {
-    try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
-      // Utilizing the new Product Engineer 'status' endpoint implemented earlier
-      const res = await fetch(`${API_URL}/${alertId}/status`, {
-        method: 'PATCH',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ status: 'acknowledged' })
+  // ── Socket.IO — listen only, backend is the only emitter ─────────────────
+  useEffect(() => {
+    const socketUrl =
+      process.env.NODE_ENV === 'development'
+        ? `http://localhost:${process.env.NEXT_PUBLIC_BACKEND_PORT || 5000}`
+        : process.env.NEXT_PUBLIC_BACKEND_URL || window.location.origin;
+
+    const socket = io(socketUrl, { transports: ['websocket', 'polling'] });
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      console.log('✅ [AlertPanel] Socket connected:', socket.id);
+      setSocketStatus('Connected');
+      // Join the live_alerts room
+      socket.emit('subscribe_alerts');
+    });
+
+    socket.on('connect_error', (err) => {
+      console.error('❌ [AlertPanel] Socket error:', err.message);
+      setSocketStatus('Error');
+    });
+
+    socket.on('disconnect', () => {
+      setSocketStatus('Disconnected');
+    });
+
+    // Backend emits full dataset notification items under new_alert
+    socket.on('new_alert', (payload: any) => {
+      console.log('🔔 [AlertPanel] new_alert received:', payload?.notification?.notification_id);
+
+      const notif = payload?.notification || payload;
+      if (!notif) return;
+
+      setLiveAlerts((prev) => {
+        // Dedup by notification_id
+        const exists = prev.some((a) => a.notification_id === notif.notification_id);
+        if (exists) return prev;
+        const updated = [notif, ...prev].slice(0, maxAlerts);
+        return updated;
       });
-      
-      if (!res.ok) throw new Error('Backend API acknowledge failed');
-      
-      console.log("🟢 Data Source: API (Ack Success)");
-      setLiveAlerts(prev => prev.map(a => (a.id === alertId || a._id === alertId) ? { ...a, acknowledged: true } : a));
-      setUnacknowledged(prev => Math.max(0, prev - 1));
+
+      if (payload.type === 'new' || notif.review_status === 'Pending') {
+        setUnacknowledged((n) => n + 1);
+      }
+    });
+
+    // Backend sends recent_alerts on first connect
+    socket.on('recent_alerts', (payload: any) => {
+      const alerts = payload?.alerts || [];
+      if (alerts.length > 0) {
+        setLiveAlerts(alerts.slice(0, maxAlerts));
+        setUnacknowledged(alerts.filter((a: any) => a.review_status === 'Pending').length);
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [maxAlerts]);
+
+  useEffect(() => {
+    loadInitialAlerts();
+  }, [loadInitialAlerts]);
+
+  const acknowledgeAlert = useCallback(async (notificationId: string) => {
+    try {
+      await api.patch(`/api/alerts/${notificationId}/acknowledge`, {});
+      setLiveAlerts((prev) =>
+        (prev ?? []).map((a) =>
+          a?.notification_id === notificationId
+            ? { ...a, review_status: 'Approved' }
+            : a
+        )
+      );
+      setUnacknowledged((n) => Math.max(0, n - 1));
     } catch (err) {
-      console.error('🔴 Failed to acknowledge alert via Backend API:', err);
+      console.error('[AlertPanel] Failed to acknowledge:', err);
     }
-  }, [API_URL]);
+  }, []);
 
   const formatTime = useCallback((timestamp?: string | Date | number) => {
     if (!timestamp) return 'just now';
     const date = new Date(timestamp);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
+    const diffMs = Date.now() - date.getTime();
     const diffMins = Math.floor(diffMs / 60000);
-
     if (diffMins < 1) return 'just now';
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h ago`;
     return date.toLocaleDateString();
   }, []);
 
-  // Initial load
-  useEffect(() => {
-    fetchAlerts();
-  }, [fetchAlerts]);
-
-  // Periodic refresh REMOVED - strictly socket-driven
-
-  // Socket.io real-time listener for Express events
-  useEffect(() => {
-    // Enforcing strict WebSocket transport as requested via Prod ENV
-    const socket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "https://argus-backend.onrender.com", {
-      transports: ["websocket"],
-    });
-    
-    socket.on("connect", () => {
-      console.log("✅ SOCKET CONNECTED:", socket.id);
-      setSocketStatus("Connected");
-    });
-    
-    socket.on("connect_error", (err) => {
-      console.log("❌ SOCKET ERROR:", err.message);
-      setSocketStatus("Disconnected");
-    });
-    
-    socket.on("disconnect", () => {
-      console.log("⚠️ Socket disconnected");
-      setSocketStatus("Disconnected");
-    });
-    
-    socket.on("new_alert", (eventData) => {
-      console.log("🚨 LIVE ALERT RECEIVED:", eventData);
-      
-      if (eventData) {
-        setLiveAlerts(prev => {
-          // Idempotency check to avoid duplicate injections
-          if (prev.some(a => (a.id && a.id === eventData.id) || (a._id && a._id === eventData._id))) return prev;
-          return [eventData, ...prev].slice(0, 20);
-        });
-        
-        if (
-          eventData.type === "new" ||
-          eventData.status === "pending"
-        ) {
-          setUnacknowledged(prev => prev + 1);
-        }
-      }
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, [showAll, fetchAlerts]);
-
   if (loading) {
     return (
       <PremiumCard>
         <PremiumCardContent className="py-8 flex items-center justify-center">
           <div className="flex flex-col items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-slate-800/50 flex items-center justify-center">
-              <Bell className="w-5 h-5 text-cyan-400 animate-pulse" />
-            </div>
+            <Bell className="w-5 h-5 text-cyan-400 animate-pulse" />
             <p className="text-sm text-slate-400">Loading alerts...</p>
           </div>
         </PremiumCardContent>
@@ -169,15 +160,6 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
 
   return (
     <PremiumCard className="flex flex-col h-full overflow-hidden relative">
-      {/* Temporary Full System Debug Panel */}
-      <div className="absolute top-2 right-2 bg-slate-950/90 border border-slate-700 p-3 rounded shadow-2xl z-50 text-[10px] font-mono flex flex-col gap-1 backdrop-blur-sm">
-        <div className="font-bold text-slate-300 border-b border-slate-700 pb-1 mb-1">SYSTEM DIAGNOSTIC</div>
-        <div className="flex justify-between gap-4"><span className="text-slate-500">Data Source:</span><span className="text-cyan-400">SOCKET.IO</span></div>
-        <div className="flex justify-between gap-4"><span className="text-slate-500">API Status:</span><span className={apiStatus === 'Connected' ? 'text-green-400' : 'text-red-400'}>{apiStatus}</span></div>
-        <div className="flex justify-between gap-4"><span className="text-slate-500">Socket.io:</span><span className={socketStatus === 'Connected' ? 'text-green-400' : 'text-orange-400'}>{socketStatus}</span></div>
-        <div className="flex justify-between gap-4"><span className="text-slate-500">Total Alerts:</span><span className="text-yellow-400">{liveAlerts.length}</span></div>
-      </div>
-  
       <PremiumCardHeader className="pb-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -192,8 +174,19 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
               )}
             </div>
             <div>
-              <PremiumCardTitle className="text-base flex items-center gap-2">Live Alerts <span className="text-[9px] bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded border border-cyan-500/30 font-bold uppercase tracking-wider hidden sm:inline-block">Data Source: SOCKET</span></PremiumCardTitle>
-              <p className="text-xs text-slate-400">Security event stream</p>
+              <PremiumCardTitle className="text-base flex items-center gap-2">
+                Live Alerts
+                <span
+                  className={`text-[9px] px-2 py-0.5 rounded border font-bold uppercase tracking-wider hidden sm:inline-block ${
+                    socketStatus === 'Connected'
+                      ? 'bg-green-500/20 text-green-400 border-green-500/30'
+                      : 'bg-red-500/20 text-red-400 border-red-500/30'
+                  }`}
+                >
+                  {socketStatus}
+                </span>
+              </PremiumCardTitle>
+              <p className="text-xs text-slate-400">Security event stream · {liveAlerts.length} alerts</p>
             </div>
           </div>
         </div>
@@ -202,88 +195,121 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
       <PremiumCardContent className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
         {liveAlerts.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-12 h-12 rounded-lg bg-slate-800/50 flex items-center justify-center mb-3">
-              <CheckCircle className="w-6 h-6 text-green-500" />
-            </div>
+            <CheckCircle className="w-6 h-6 text-green-500 mb-2" />
             <p className="text-slate-300 text-sm font-medium">No active alerts</p>
-            <p className="text-slate-500 text-xs">System is operating normally</p>
+            <p className="text-slate-500 text-xs">Waiting for real-time stream…</p>
           </div>
         ) : (
           <div className="space-y-2">
             {liveAlerts.map((alert, index) => {
-              const config = severityConfig[alert.severity as keyof typeof severityConfig] || severityConfig.low;
+              const config = getSeverityConfig(alert.severity || alert.priority || 'low');
               const Icon = config.icon || Bell;
+              const isAcknowledged = alert.review_status === 'Approved';
 
               return (
                 <div
-                  key={alert.id || alert._id || index}
-                  className={`
-                    alert-card group relative p-4 rounded-lg border transition-all duration-300
-                    ${
-                      alert.acknowledged
-                        ? 'bg-slate-900/40 border-slate-700/30 opacity-60'
-                        : 'bg-slate-800/60 border-slate-600/50 hover:border-slate-500/70'
-                    }
-                    hover-lift
-                  `}
+                  key={alert.notification_id || index}
+                  className={`group relative p-3 rounded-lg border transition-all duration-300 ${
+                    isAcknowledged
+                      ? 'bg-slate-900/40 border-slate-700/30 opacity-60'
+                      : 'bg-slate-800/60 border-slate-600/50 hover:border-slate-500/70'
+                  }`}
                 >
-                  {/* Left border accent */}
-                  {!alert.acknowledged && (
-                    <div className={`
-                      absolute left-0 top-0 bottom-0 w-1 rounded-l-lg
-                      ${alert.severity === 'critical' ? 'bg-red-500' : ''}
-                      ${alert.severity === 'high' ? 'bg-orange-500' : ''}
-                      ${alert.severity === 'medium' ? 'bg-yellow-500' : ''}
-                      ${alert.severity === 'low' ? 'bg-cyan-500' : ''}
-                      animate-pulse
-                    `} />
+                  {/* Left severity accent */}
+                  {!isAcknowledged && (
+                    <div
+                      className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-lg ${config.bgColor.replace('/20', '')} animate-pulse`}
+                    />
                   )}
 
                   <div className="flex items-start gap-3">
-                    {/* Icon */}
                     <div className={`mt-1 p-1.5 rounded-md ${config.bgColor}`}>
                       <Icon className={`w-4 h-4 ${config.color}`} />
                     </div>
 
-                    {/* Content */}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2 mb-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <SeverityBadge
-                            severity={alert.severity as any}
-                            showIcon={false}
-                            animated={!alert.acknowledged}
-                          />
-                          <span className="text-xs text-slate-500">{alert.notification_id}</span>
-                        </div>
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <SeverityBadge
+                          severity={alert.threat_category || alert.severity || alert.priority || 'safe'}
+                          showIcon={false}
+                          animated={!isAcknowledged}
+                        />
+                        <span className="text-xs text-slate-500 font-mono">
+                          {alert.notification_id}
+                        </span>
+                        {alert.risk_score !== undefined && (
+                          <span className="text-xs text-slate-400">
+                            {Math.round(alert.risk_score * 100)}% risk
+                          </span>
+                        )}
+                        
+                        {/* AI Explanation Popover */}
+                        {alert.ai_explanation && (
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button variant="ghost" className="h-4 w-4 p-0 ml-1 text-cyan-400 hover:text-cyan-300">
+                                <Info className="h-3 w-3" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-80 bg-slate-900 border-slate-700 shadow-2xl p-4 z-50">
+                              <div className="space-y-3">
+                                <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+                                  <Zap className="h-4 w-4 text-cyan-400" />
+                                  <h4 className="font-semibold text-sm text-cyan-100">AI Analysis</h4>
+                                </div>
+                                <p className="text-xs text-slate-300 leading-relaxed italic">
+                                  "{alert.ai_explanation}"
+                                </p>
+                                {alert.signals && alert.signals.length > 0 && (
+                                  <div className="space-y-2 pt-1">
+                                    <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Detected Signals</p>
+                                    <div className="flex flex-wrap gap-1">
+                                      {alert.signals.map((signal: string, i: number) => (
+                                        <span key={i} className="text-[9px] px-1.5 py-0.5 rounded-sm bg-cyan-500/10 border border-cyan-500/20 text-cyan-300">
+                                          {signal}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        )}
                       </div>
 
-                      <p className="text-sm text-slate-200 mb-2 font-medium">
-                        {alert.message}
+                      <p className="text-xs text-slate-300 line-clamp-2">
+                        {alert.content || alert.message || 'No content'}
                       </p>
 
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between mt-2">
                         <div className="flex items-center gap-1 text-slate-500 text-xs">
                           <Clock className="w-3 h-3" />
                           <span>{formatTime(alert.timestamp)}</span>
+                          {alert.sender && (
+                            <span className="ml-2 text-slate-600 truncate max-w-[120px]">
+                              {alert.sender}
+                            </span>
+                          )}
                         </div>
 
-                        {!alert.acknowledged && (
+                        {!isAcknowledged && (
                           <Button
                             size="sm"
                             variant="ghost"
                             className="h-6 px-2 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={() => acknowledgeAlert(alert.id)}
+                            onClick={() => acknowledgeAlert(alert.notification_id)}
                           >
                             <CheckCircle className="w-3 h-3 mr-1" />
-                            Acknowledge
+                            Approve
                           </Button>
                         )}
                       </div>
                     </div>
 
-                    {/* Right indicator */}
-                    <SeverityIndicator severity={alert.severity as any} />
+                    <SeverityIndicator
+                      severity={alert.threat_category || alert.severity || alert.priority || 'safe'}
+                    />
                   </div>
                 </div>
               );

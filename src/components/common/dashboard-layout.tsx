@@ -3,10 +3,11 @@
 import { ReactNode } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { useTheme } from '@/components/theme-provider';
+import { useSidebar, SidebarProvider } from '@/lib/sidebar-context';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Shield, Eye, Activity, RefreshCw, LogOut, Sun, Moon } from 'lucide-react';
+import { Shield, Eye, Activity, LogOut, Sun, Moon, Menu } from 'lucide-react';
 import { Sidebar } from '@/components/layout/sidebar';
 import NotificationBell from "@/components/ui/NotificationBell";
 import { GlobalNotificationToast } from '@/components/common/global-notification-toast';
@@ -19,15 +20,6 @@ interface DashboardLayoutProps {
   onNavTabChange?: (tab: string) => void;
 }
 
-const DEFAULT_ROLE_CONFIG = {
-  label: 'User',
-  icon: <Shield className="w-4 h-4" />,
-  color: 'text-gray-500',
-  bgColor: 'bg-gray-100 border-gray-300',
-  textColor: 'text-gray-500',
-  badgeColor: 'bg-gray-100 border-gray-300'
-};
-
 const roleConfig: Record<string, { label: string; icon: React.ReactNode; color: string; bgColor: string }> = {
   admin: { label: 'Admin', icon: <Shield className="w-4 h-4" />, color: 'text-red-500', bgColor: 'bg-red-500/10 border-red-500/30' },
   fraud_analyst: { label: 'Fraud Analyst', icon: <Eye className="w-4 h-4" />, color: 'text-blue-500', bgColor: 'bg-blue-500/10 border-blue-500/30' },
@@ -36,15 +28,10 @@ const roleConfig: Record<string, { label: string; icon: React.ReactNode; color: 
   auditor: { label: 'Auditor', icon: <Shield className="w-4 h-4" />, color: 'text-purple-500', bgColor: 'bg-purple-500/10 border-purple-500/30' },
 };
 
-export function DashboardLayout({ 
-  children, 
-  title, 
-  subtitle,
-  activeNavTab = 'overview',
-  onNavTabChange
-}: DashboardLayoutProps) {
+function DashboardLayoutInner({ children, title, subtitle }: DashboardLayoutProps) {
   const { user, logout } = useAuth();
   const { resolvedTheme, setTheme } = useTheme();
+  const { setMobileOpen } = useSidebar();
   const router = useRouter();
 
   const handleLogout = () => {
@@ -58,24 +45,29 @@ export function DashboardLayout({
 
   if (!user) return null;
 
-  const currentRoleConfig = roleConfig?.[user.role] ?? roleConfig.employee;
-  
-  // Debug: Log the actual user role and config
-  console.log('DashboardLayout - User role:', user?.role);
-  console.log('DashboardLayout - Role config:', currentRoleConfig);
-  
-  // Add console warning if role not found
-  if (!roleConfig?.[user.role] && user.role) {
-    console.warn(`Role '${user.role}' not found in roleConfig, using default`);
-  }
+  const currentRoleConfig = roleConfig[user.role] ?? {
+    label: 'User', icon: <Shield className="w-4 h-4" />, color: 'text-gray-500', bgColor: 'bg-gray-500/10 border-gray-500/30'
+  };
 
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">
-        <div className="container mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
+        <div className="px-4 sm:px-6 py-4">
+          <div className="flex items-center justify-between gap-4">
+
+            <div className="flex items-center gap-2 sm:gap-3">
+              {/* Mobile hamburger - only for non-admin */}
+              {user.role !== 'admin' && (
+                <button
+                  onClick={() => setMobileOpen(true)}
+                  className="md:hidden p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                  aria-label="Open menu"
+                >
+                  <Menu className="w-5 h-5" />
+                </button>
+              )}
+
               <div className="relative">
                 <div className="absolute inset-0 bg-cyan-500/20 blur-xl rounded-full" />
                 <div className="relative bg-gradient-to-br from-cyan-500 to-blue-600 p-2.5 rounded-xl">
@@ -88,7 +80,7 @@ export function DashboardLayout({
               </div>
             </div>
 
-            <div className="flex items-center gap-6">
+            <div className="flex items-center gap-3 sm:gap-4">
               <div className="hidden md:flex items-center gap-4 text-sm">
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Activity className="w-4 h-4 text-green-500" />
@@ -100,12 +92,12 @@ export function DashboardLayout({
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 border-l border-border pl-4">
-                <Badge className={`${currentRoleConfig.bgColor} ${currentRoleConfig.color} flex items-center gap-1.5 px-3 py-1`}>
+              <div className="flex items-center gap-2 border-l border-border pl-3 sm:pl-4">
+                <Badge className={`${currentRoleConfig.bgColor} ${currentRoleConfig.color} flex items-center gap-1.5 px-2 sm:px-3 py-1`}>
                   {currentRoleConfig.icon}
-                  <span>{currentRoleConfig.label}</span>
+                  <span className="hidden sm:inline">{currentRoleConfig.label}</span>
                 </Badge>
-                <span className="text-sm text-muted-foreground hidden sm:inline">{user.orgId}</span>
+                <span className="text-sm text-muted-foreground hidden lg:inline">{user.orgId}</span>
               </div>
 
               <NotificationBell />
@@ -115,11 +107,12 @@ export function DashboardLayout({
                 size="icon"
                 onClick={toggleTheme}
                 className="border-border"
+                title={resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
               >
                 {resolvedTheme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
               </Button>
 
-              <Button variant="outline" size="icon" onClick={handleLogout} className="border-border">
+              <Button variant="outline" size="icon" onClick={handleLogout} className="border-border" title="Logout">
                 <LogOut className="h-4 w-4" />
               </Button>
             </div>
@@ -128,11 +121,11 @@ export function DashboardLayout({
       </header>
 
       <div className="flex">
-        {/* Sidebar - Only render if user is not admin (admin uses its own sidebar) */}
-        {user?.role !== 'admin' && <Sidebar />}
+        {/* Sidebar for non-admin roles */}
+        {user.role !== 'admin' && <Sidebar />}
 
         {/* Main Content */}
-        <main className="flex-1 p-6">
+        <main className="flex-1 min-w-0 p-4 sm:p-6">
           {title && (
             <div className="mb-6">
               <h2 className="text-2xl font-bold text-foreground">{title}</h2>
@@ -143,8 +136,15 @@ export function DashboardLayout({
         </main>
       </div>
 
-      {/* Global Notification Toast */}
       <GlobalNotificationToast />
     </div>
+  );
+}
+
+export function DashboardLayout(props: DashboardLayoutProps) {
+  return (
+    <SidebarProvider>
+      <DashboardLayoutInner {...props} />
+    </SidebarProvider>
   );
 }

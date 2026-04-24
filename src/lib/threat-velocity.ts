@@ -1,4 +1,4 @@
-import type { Notification } from './ml-service';
+import { DatasetNotification } from './types';
 
 interface ThreatVelocityResult {
   current24h: number;
@@ -8,7 +8,7 @@ interface ThreatVelocityResult {
   displayText: string;
 }
 
-export function calculateThreatVelocity(notifications: Notification[]): ThreatVelocityResult {
+export function calculateThreatVelocity(notifications: DatasetNotification[]): ThreatVelocityResult {
   if (!Array.isArray(notifications)) {
     return {
       current24h: 0,
@@ -25,7 +25,7 @@ export function calculateThreatVelocity(notifications: Notification[]): ThreatVe
   const previous24hEnd = current24hStart;
 
   // Filter high-risk notifications (risk_score > 0.7)
-  const isHighRisk = (notification: Notification) => {
+  const isHighRisk = (notification: DatasetNotification) => {
     const riskScore = notification?.risk_score ?? 0;
     return riskScore > 0.7;
   };

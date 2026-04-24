@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback, useMemo } from "react";
 import { io, Socket } from "socket.io-client";
 import toast from "react-hot-toast";
 
@@ -8,6 +8,10 @@ let socketInstance: Socket | null = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 const RECONNECT_DELAY = 2000;
+const NOTIFICATION_THROTTLE_MS = 7000; // 7s minimum cadence to prevent UI blocking
+let lastNotificationTime = 0;
+let queuedNotification: any = null;
+let throttleTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Initialize Socket.IO connection with robust reconnection handling
@@ -18,7 +22,11 @@ function initializeSocket(): Socket {
     return socketInstance;
   }
 
-  socketInstance = io(process.env.NEXT_PUBLIC_BACKEND_URL || "https://argus-backend.onrender.com", { transports: ["websocket"],
+  const socketUrl = process.env.NODE_ENV === 'development' 
+    ? "http://localhost:5000" 
+    : process.env.NEXT_PUBLIC_BACKEND_URL || window.location.origin;
+
+  socketInstance = io(socketUrl, {
     reconnection: true,
     reconnectionDelay: RECONNECT_DELAY,
     reconnectionDelayMax: 10000,
@@ -57,29 +65,61 @@ function initializeSocket(): Socket {
 }
 
 /**
- * Dispatch browser event for new_alert
+ * Dispatch browser event for new_alert with throttling
  * This is the single source of truth for all notification listeners
  */
-export function dispatchNotificationEvent(data: any) {
+function emitNotification(data: any) {
   const eventData = {
     type: data.type || "new", // "new", "acknowledged", etc.
-    notification: data || data,
+    notification: data,
     severity: data?.severity || data.severity || "medium",
     timestamp: new Date(),
   };
 
   // Dispatch browser event (single source of truth)
-  window.dispatchEvent(
-    new CustomEvent("new_alert", { detail: eventData })
-  );
+  // Use requestAnimationFrame for better performance
+  requestAnimationFrame(() => {
+    window.dispatchEvent(
+      new CustomEvent("new_alert", { detail: eventData })
+    );
+  });
 
-  // Show toast based on severity and type
-  showNotificationToast(eventData);
+  // Show toast based on severity and type (async)
+  requestAnimationFrame(() => {
+    showNotificationToast(eventData);
+  });
 
-  // Play sound for critical notifications
+  // Play sound for critical notifications (async)
   if (eventData.severity === "critical") {
-    playCriticalSound();
+    requestAnimationFrame(() => {
+      playCriticalSound();
+    });
   }
+}
+
+export function dispatchNotificationEvent(data: any) {
+  const now = Date.now();
+  const elapsed = now - lastNotificationTime;
+
+  if (elapsed >= NOTIFICATION_THROTTLE_MS) {
+    lastNotificationTime = now;
+    emitNotification(data);
+    return;
+  }
+
+  // Keep the latest notification from burst traffic and emit when window opens.
+  queuedNotification = data;
+  if (throttleTimer) return;
+
+  const remaining = NOTIFICATION_THROTTLE_MS - elapsed;
+  throttleTimer = setTimeout(() => {
+    throttleTimer = null;
+    if (!queuedNotification) return;
+
+    lastNotificationTime = Date.now();
+    emitNotification(queuedNotification);
+    queuedNotification = null;
+  }, remaining);
 }
 
 /**
@@ -208,7 +248,6 @@ export function NotificationProvider({
   children: React.ReactNode;
 }) {
   const initRef = useRef(false);
-  const streamTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     // Only initialize once
@@ -216,33 +255,10 @@ export function NotificationProvider({
       initializeSocket();
       initRef.current = true;
       console.log("🚀 NotificationProvider initialized");
-
-      // Start streaming notifications from the dataset
-      streamTimerRef.current = setInterval(async () => {
-        try {
-          const res = await fetch(`/api/notifications/stream`);
-          const data = await res.json();
-          const batch = datas || [];
-
-          for (const notif of batch) {
-            dispatchNotificationEvent({
-              type: "new",
-              notification: notif,
-              severity: notif.severity || "medium",
-            });
-          }
-        } catch (err) {
-          // Silently ignore stream errors
-        }
-      }, 8000); // Emit one notification every 8 seconds
     }
 
     // Cleanup on unmount
     return () => {
-      if (streamTimerRef.current) {
-        clearInterval(streamTimerRef.current);
-        streamTimerRef.current = null;
-      }
       if (socketInstance) {
         console.log("🧹 Cleaning up Socket.IO connection");
         socketInstance.disconnect();

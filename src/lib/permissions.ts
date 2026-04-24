@@ -7,7 +7,46 @@ import { Role, PermissionType, User } from "./types";
 import { DEFAULT_ROLE_PERMISSIONS } from "./models/RolePermission";
 
 // ============================================
-// PERMISSION CHECK FUNCTIONS
+// FRAUD ANALYST SPECIFIC PERMISSIONS
+// ============================================
+
+/**
+ * Check if user can assign cases to analysts
+ */
+export function canAssignCases(user: User | null): boolean {
+  return canUserPerform(user, 'assign_cases');
+}
+
+/**
+ * Check if user can review cases
+ */
+export function canReviewCases(user: User | null): boolean {
+  return canUserPerform(user, 'review_cases');
+}
+
+/**
+ * Check if user can escalate cases
+ */
+export function canEscalateCases(user: User | null): boolean {
+  return canUserPerform(user, 'escalate_cases');
+}
+
+/**
+ * Check if user can import dataset
+ */
+export function canImportDataset(user: User | null): boolean {
+  return canUserPerform(user, 'import_dataset');
+}
+
+/**
+ * Check if user can perform bulk operations
+ */
+export function canPerformBulkOperations(user: User | null): boolean {
+  return canUserPerform(user, 'bulk_operations');
+}
+
+// ============================================
+// UPDATED PERMISSION CHECK FUNCTIONS
 // ============================================
 
 /**
@@ -124,7 +163,7 @@ export function canManageRolesPermissions(user: User | null): boolean {
 
 /**
  * Filter notifications based on user permissions
- * Backend should use this before returning data
+ * Updated for new dataset structure
  */
 export function filterNotificationsByPermission(
   notifications: any[],
@@ -144,18 +183,24 @@ export function filterNotificationsByPermission(
       return true;
     }
 
-    if (canViewDepartmentNotifications(user) && notification.departmentId === user.departmentId) {
+    // Updated for new dataset structure
+    if (canViewDepartmentNotifications(user) && (notification.department === user.department || notification.department === user.departmentId)) {
       return true;
     }
 
-    if (canViewPersonalNotifications(user) && notification.userId === user.email) {
+    if (canViewPersonalNotifications(user) && notification.receiver === user.email) {
       return true;
     }
 
-    if (canViewFraudFeed(user) && notification.category === 'fraud') {
+    if (canViewFraudFeed(user) && notification.threat_category !== 'safe') {
       return true;
     }
 
+    if (canReviewCases(user) && notification.review_status === 'Pending') {
+      return true;
+    }
+
+    // Role-based filtering
     if (notification.roleFilter === user.role) {
       return true;
     }

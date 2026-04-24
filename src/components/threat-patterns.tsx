@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Shield, AlertTriangle, Eye, Activity } from 'lucide-react';
 import type { ThreatPattern } from '@/lib/mock-data';
+import api from '@/lib/api';
 
 const severityColors = {
   Critical: 'bg-red-500/20 text-red-400 border-red-500/30',
@@ -19,13 +20,62 @@ const statusColors = {
   Resolved: 'bg-green-500',
 };
 
+function resolveSeverityClass(severity?: string) {
+  if (!severity) return severityColors.Medium;
+  const normalized = severity.charAt(0).toUpperCase() + severity.slice(1).toLowerCase();
+  return severityColors[normalized as keyof typeof severityColors] || severityColors.Medium;
+}
+
+function resolveStatusClass(status?: string) {
+  if (!status) return statusColors.Monitoring;
+  const normalized = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+  return statusColors[normalized as keyof typeof statusColors] || statusColors.Monitoring;
+}
+
 export function ThreatPatterns() {
   const [patterns, setPatterns] = useState<ThreatPattern[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    fetch('/api/threats')
-      .then(r => r.json())
-      .then(d => setPatterns(d.patterns));
+    let mounted = true;
+
+    const load = async () => {
+      try {
+        setLoading(true);
+        const response = await api.get<any>('/api/threats');
+        const source = Array.isArray(response?.patterns)
+          ? response.patterns
+          : Array.isArray(response?.data?.patterns)
+            ? response.data.patterns
+            : [];
+
+        if (!mounted) return;
+        setPatterns(
+          source.map((item: any, index: number) => ({
+            id: item.id || `${item.name || 'pattern'}-${index}`,
+            name: item.name || item.type || 'Unknown threat',
+            description: item.description || 'Derived threat pattern from dataset analysis.',
+            severity: item.severity || 'Medium',
+            status: item.status || 'Active',
+            indicators: Array.isArray(item.indicators) ? item.indicators : [],
+            detectedCount: Number(item.detectedCount || item.count || 0),
+          }))
+        );
+        setError('');
+      } catch (err: any) {
+        if (!mounted) return;
+        setPatterns([]);
+        setError(err?.message || 'Failed to load threat patterns');
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    load();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   return (
@@ -37,27 +87,39 @@ export function ThreatPatterns() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
+        {loading && (
+          <div className="text-sm text-zinc-400">Loading threat patterns...</div>
+        )}
+
+        {!loading && error && (
+          <div className="text-sm text-red-400">{error}</div>
+        )}
+
+        {!loading && !error && patterns.length === 0 && (
+          <div className="text-sm text-zinc-400">No threat patterns available.</div>
+        )}
+
         {patterns.map((pattern) => (
           <div
             key={pattern.id}
-            className={`p-4 rounded-lg border ${severityColors[pattern.severity]} bg-opacity-10`}
+            className={`p-4 rounded-lg border ${resolveSeverityClass(pattern.severity)} bg-opacity-10`}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
                   <AlertTriangle className="w-4 h-4" />
                   <span className="font-semibold">{pattern.name}</span>
-                  <Badge className={severityColors[pattern.severity]}>
+                  <Badge className={resolveSeverityClass(pattern.severity)}>
                     {pattern.severity}
                   </Badge>
                   <div className="flex items-center gap-1">
-                    <div className={`w-2 h-2 rounded-full ${statusColors[pattern.status]}`} />
+                    <div className={`w-2 h-2 rounded-full ${resolveStatusClass(pattern.status)}`} />
                     <span className="text-xs text-zinc-400">{pattern.status}</span>
                   </div>
                 </div>
                 <p className="text-sm text-zinc-400 mb-2">{pattern.description}</p>
                 <div className="flex flex-wrap gap-1">
-                  {pattern.indicators.map((ind, i) => (
+                  {(Array.isArray(pattern.indicators) ? pattern.indicators : []).map((ind, i) => (
                     <span key={i} className="text-xs px-2 py-0.5 bg-zinc-800 rounded text-zinc-300">
                       {ind}
                     </span>

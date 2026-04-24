@@ -17,7 +17,7 @@ const roleConfig: Record<Role, { label: string; icon: React.ReactNode; color: st
     color: 'text-red-500',
     description: 'Full system access, ML model management'
   },
-  analyst: { 
+  fraud_analyst: { 
     label: 'Fraud Analyst', 
     icon: <Search className="w-4 h-4" />, 
     color: 'text-blue-500',
@@ -60,14 +60,11 @@ export default function LoginPage() {
     setError(null);
 
     try {
-      const success = await login(email, password, role, orgId);
-      if (success) {
-        router.push('/');
-      } else {
-        setError('Login failed. Please try again.');
-      }
-    } catch {
-      setError('An error occurred. Please try again.');
+      await login(email, password, role, orgId);
+      router.push('/');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Login failed. Please try again.';
+      setError(message);
     } finally {
       setLoading(false);
     }

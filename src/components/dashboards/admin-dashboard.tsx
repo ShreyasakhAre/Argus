@@ -1,91 +1,205 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { useRole } from '@/components/role-provider';
+import { useAuth } from '@/components/auth-provider';
+
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, LineChart, Line, AreaChart, Area
-} from 'recharts';
-import {
-  AlertTriangle, CheckCircle, Activity, TrendingUp, RefreshCw, Shield,
-  Download, QrCode, Zap, Users, Target
+  AlertTriangle,
+  CheckCircle,
+  RefreshCw,
+  TrendingUp,
+  Shield,
+  Activity,
+  Download,
+  Globe,
+  Bot,
+  BarChart3,
+  Bell,
 } from 'lucide-react';
+
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  CartesianGrid,
+  Tooltip,
+  XAxis,
+  YAxis,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+} from 'recharts';
+
+import NotificationsFeed from '@/components/notifications-feed';
 import { AlertPanel } from '@/components/alert-panel';
 import { ThreatPatterns } from '@/components/threat-patterns';
 import { AnalyticsPanel } from '@/components/analytics-panel';
 import { ScannerTools } from '@/components/scanner-tools';
 import { AdminRolesPanel } from '@/components/admin-roles-panel';
-import { SidebarNav } from '@/components/dashboards/sidebar-nav';
-import { PremiumCard, PremiumCardHeader, PremiumCardTitle, PremiumCardContent, PremiumCardFooter } from '@/components/ui/premium-card';
-import type { Stats } from '@/lib/ml-service';
-import NotificationsFeed from "@/components/notifications-feed";
-import { calculateThreatVelocity } from '@/lib/threat-velocity';
+import { AutonomousAgentPanel } from '@/components/autonomous-agent-panel';
+import { AgentActivityLog } from '@/components/agent-activity-log';
+import { AdminRiskManagement } from '@/components/admin-risk-management';
+import { LiveAttackMap } from '@/components/live-attack-map';
+import { PolicyManagement } from '@/components/policy-management';
+import { InsightsPanel } from '@/components/insights-panel';
+import { SidebarNotifications } from '@/components/common/sidebar-notifications';
+import { LiveAlertContainer } from '@/components/live-alert-toast';
+import { useRealtimeAlerts } from '@/hooks/useRealtimeAlerts';
+import api from '@/lib/api';
 
-const COLORS = ['#ef4444', '#f97316', '#eab308', '#06b6d4', '#3b82f6', '#8b5cf6'];
+type DashboardTab =
+  | 'overview'
+  | 'agent'
+  | 'risk'
+  | 'attack-map'
+  | 'policies'
+  | 'insights'
+  | 'threats'
+  | 'analytics'
+  | 'scanners'
+  | 'permissions';
 
-interface StatCard {
-  title: string;
-  value: string | number;
-  subtitle?: string;
-  icon: React.ReactNode;
-  trend?: number;
-  color: 'red' | 'orange' | 'yellow' | 'cyan' | 'blue' | 'purple' | 'green';
+interface Stats {
+  totalAlerts: number;
+  flagged: number;
+  benign: number;
+  avgRiskScore?: number;
+  high_risk?: number;
+  medium_risk?: number;
+  low_risk?: number;
+  flagged_percentage?: number;
+  department_stats?: Record<
+    string,
+    {
+      total: number;
+      flagged: number;
+      avg_risk: number;
+    }
+  >;
+  model_metrics: {
+    accuracy: number;
+    precision: number;
+    recall: number;
+    f1_score: number;
+    total_samples: number;
+    malicious_samples?: number;
+    benign_samples?: number;
+  };
+  feature_importance?: Record<string, number>;
 }
 
+interface NotificationItem {
+  risk_level?: string;
+  timestamp?: string;
+}
+
+interface NotificationSummary {
+  totalNotifications: number;
+  unreadNotifications: number;
+  activeNotifications: number;
+}
+
+const COLORS = ['#ef4444', '#22c55e'];
+
 export function AdminDashboard() {
-  const { orgId } = useRole();
+  const { user } = useAuth();
+  const orgId = user?.orgId || 'ORG001';
+  const { alerts, removeAlert } = useRealtimeAlerts();
+
+  const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [stats, setStats] = useState<Stats | null>(null);
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [notificationSummary, setNotificationSummary] = useState<NotificationSummary>({
+    totalNotifications: 0,
+    unreadNotifications: 0,
+    activeNotifications: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [retraining, setRetraining] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'threats' | 'analytics' | 'scanners' | 'permissions'>('overview');
-  
-  // Check if sidebar is already rendered by global layout
-  const isStandalone = false; // Admin dashboard uses global layout, so no internal sidebar
+  const [error, setError] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    fetchStats();
-    fetchNotifications();
+    boot();
   }, [orgId]);
 
-  const fetchStats = async () => {
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchStats();
+      fetchNotifications();
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, [orgId]);
+
+  // Force refetch after login
+  useEffect(() => {
+    const handleLoginSuccess = () => {
+      console.log('Login success detected, forcing dashboard refetch');
+      boot(); // Force immediate refetch
+    };
+
+    window.addEventListener('auth_login_success', handleLoginSuccess);
+    return () => window.removeEventListener('auth_login_success', handleLoginSuccess);
+  }, []);
+
+  const boot = async () => {
     setLoading(true);
+    await Promise.all([fetchStats(), fetchNotifications()]);
+    setLoading(false);
+  };
+
+  const fetchStats = async () => {
     try {
-      const res = await fetch('/api/stats');
-      if (!res.ok) throw new Error('Failed to fetch stats');
-      const data = await res.json();
-      setStats(data);
-    } catch (e) {
-      console.error('Failed to load stats:', e);
-    } finally {
-      setLoading(false);
+      console.log('Fetching stats for all data (no org filter)');
+      const resData = await api.get(`/stats${orgId ? `?org_id=${orgId}` : ''}`);
+      
+      if (resData.success && resData.data) {
+        setStats(resData.data);
+        console.log('Stats loaded:', resData.data);
+      }
+      setError('');
+    } catch (err: any) {
+      console.error('Fetch stats error:', err);
+      setError('Failed to load stats');
     }
   };
 
   const fetchNotifications = async () => {
     try {
-      const res = await fetch(`/api/notifications?org_id=${orgId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setNotifications(data?.notifications || []);
-      }
-    } catch (e) {
-      console.error('Failed to load notifications:', e);
+      const notificationsData = await api.get('/notifications?limit=10000');
+
+      setNotifications(Array.isArray(notificationsData?.data) ? notificationsData.data : (Array.isArray(notificationsData) ? notificationsData : []));
+      setNotificationSummary({
+        totalNotifications: notificationsData?.totalCount ?? 0,
+        unreadNotifications: notificationsData?.unreadCount ?? 0,
+        activeNotifications: notificationsData?.unreadCount ?? 0,
+      });
+    } catch (err: any) {
+      console.error('Fetch notifications error:', err);
     }
   };
 
   const handleRetrain = async () => {
-    setRetraining(true);
-    await fetch('/api/retrain', { method: 'POST' });
-    await fetchStats();
-    setRetraining(false);
+    try {
+      setRetraining(true);
+      await api.post('/retrain');
+      await fetchStats();
+    } finally {
+      setRetraining(false);
+    }
   };
 
   const handleExport = async (format: 'csv' | 'json') => {
-    const res = await fetch(`/api/export?format=${format}&org_id=${orgId}`);
-    const data = await res.json();
-    const blob = new Blob([data.content], { type: format === 'csv' ? 'text/csv' : 'application/json' });
+    const data = await api.get(`/export?format=${format}&org_id=${orgId}`);
+
+    const blob = new Blob([data.content], {
+      type: format === 'csv' ? 'text/csv' : 'application/json',
+    });
+
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -93,405 +207,395 @@ export function AdminDashboard() {
     a.click();
   };
 
+  const threatVelocity = useMemo(() => {
+    const safeNotifications = Array.isArray(notifications) ? notifications : [];
+    const now = Date.now();
+
+    const current24 = safeNotifications.filter((n) => {
+      if (!n?.timestamp) return false;
+      const t = new Date(n.timestamp).getTime();
+      return now - t <= 24 * 60 * 60 * 1000;
+    }).length;
+
+    const previous24 = safeNotifications.filter((n) => {
+      if (!n?.timestamp) return false;
+      const t = new Date(n.timestamp).getTime();
+      const diff = now - t;
+      return (
+        diff > 24 * 60 * 60 * 1000 &&
+        diff <= 48 * 60 * 60 * 1000
+      );
+    }).length;
+
+    const change =
+      previous24 === 0
+        ? current24 * 100
+        : ((current24 - previous24) / previous24) * 100;
+
+    return {
+      current24,
+      previous24,
+      percentage: change,
+      spike: change > 40,
+    };
+  }, [notifications]);
+
   if (loading || !stats) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 gap-4">
+      <div className="h-[70vh] flex items-center justify-center">
         <RefreshCw className="w-8 h-8 animate-spin text-cyan-400" />
-        <p className="text-slate-400">Loading dashboard...</p>
       </div>
     );
   }
 
-  const safeStats = stats ?? {
-  department_stats: {},
-  total_notifications: 0,
-  flagged_notifications: 0,
-  benign_notifications: 0,
-  model_metrics: {
-    accuracy: 0,
-    precision: 0,
-    recall: 0,
-    f1_score: 0,
-    total_samples: 0
-  }
-};
-
-  // Calculate threat velocity
-  const threatVelocity = calculateThreatVelocity(notifications);
+  const deptData = Object.entries(stats?.department_stats ?? {}).map(
+    ([key, value]) => ({
+      department: key,
+      total: value.total,
+      flagged: value.flagged,
+    })
+  );
 
   const pieData = [
-    { name: 'Flagged', value: safeStats.flagged_notifications || 0 },
-    { name: 'Benign', value: safeStats.benign_notifications || 0 },
+    {
+      name: 'Flagged',
+      value: stats?.flagged ?? 0,
+    },
+    {
+      name: 'Benign',
+      value: stats?.benign ?? 0,
+    },
   ];
-
-  const deptData = safeStats.department_stats && typeof safeStats.department_stats === 'object' 
-    ? Object.entries(safeStats.department_stats).map(([dept, data]) => ({
-        department: dept,
-        total: data?.total || 0,
-        flagged: data?.flagged || 0,
-        risk: Math.round((data?.avg_risk || 0) * 100),
-      }))
-    : [];
 
   const trendData = [
-    { day: 'Mon', flagged: 3, total: 15, risk: 20 },
-    { day: 'Tue', flagged: 5, total: 18, risk: 28 },
-    { day: 'Wed', flagged: 2, total: 12, risk: 17 },
-    { day: 'Thu', flagged: 4, total: 20, risk: 24 },
-    { day: 'Fri', flagged: 3, total: 16, risk: 19 },
+    { day: 'Mon', total: 18, flagged: 4 },
+    { day: 'Tue', total: 22, flagged: 7 },
+    { day: 'Wed', total: 16, flagged: 3 },
+    { day: 'Thu', total: 26, flagged: 9 },
+    { day: 'Fri', total: 20, flagged: 5 },
   ];
-
-  const statCards: StatCard[] = [
-    {
-      title: 'Total Notifications',
-      value: stats?.total_notifications || 0,
-      subtitle: 'All time',
-      icon: <Activity className="w-6 h-6" />,
-      trend: 12,
-      color: 'cyan',
-    },
-    {
-      title: 'Flagged Alerts',
-      value: stats?.flagged_notifications || 0,
-      subtitle: 'Requires action',
-      icon: <AlertTriangle className="w-6 h-6" />,
-      trend: -5,
-      color: 'red',
-    },
-    {
-      title: 'Benign',
-      value: stats?.benign_notifications || 0,
-      subtitle: 'Cleared',
-      icon: <CheckCircle className="w-6 h-6" />,
-      trend: 8,
-      color: 'green',
-    },
-    {
-      title: 'Model Accuracy',
-      value: `${Math.round((stats?.model_metrics?.accuracy || 0) * 100)}%`,
-      subtitle: 'Performance',
-      icon: <TrendingUp className="w-6 h-6" />,
-      color: 'blue',
-    },
-  ];
-
-  const getColorClasses = (color: string) => {
-    const colors: Record<string, { bg: string; icon: string; text: string; border: string }> = {
-      red: { bg: 'bg-red-500/10', icon: 'text-red-400', text: 'text-red-300', border: 'border-red-500/20' },
-      orange: { bg: 'bg-orange-500/10', icon: 'text-orange-400', text: 'text-orange-300', border: 'border-orange-500/20' },
-      yellow: { bg: 'bg-yellow-500/10', icon: 'text-yellow-400', text: 'text-yellow-300', border: 'border-yellow-500/20' },
-      cyan: { bg: 'bg-cyan-500/10', icon: 'text-cyan-400', text: 'text-cyan-300', border: 'border-cyan-500/20' },
-      blue: { bg: 'bg-blue-500/10', icon: 'text-blue-400', text: 'text-blue-300', border: 'border-blue-500/20' },
-      green: { bg: 'bg-green-500/10', icon: 'text-green-400', text: 'text-green-300', border: 'border-green-500/20' },
-      purple: { bg: 'bg-purple-500/10', icon: 'text-purple-400', text: 'text-purple-300', border: 'border-purple-500/20' },
-    };
-    return colors[color] || colors.cyan;
-  };
 
   return (
-    <div className="flex-1 overflow-y-auto bg-slate-950" style={{ width: '100%' }}>
-      <div className="space-y-2 w-full" style={{ width: '100%' }}>
-          {/* Header */}
-          <div className="border-b border-slate-800 bg-slate-900/50 backdrop-blur-sm sticky top-0 z-10">
-            <div className="px-6 py-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h1 className="text-2xl font-bold text-white">Admin Dashboard</h1>
-                  <p className="text-slate-400">System overview and management</p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => window.location.reload()}
-                    className="border-slate-700 text-slate-300 hover:bg-slate-800"
-                  >
-                    <RefreshCw className="w-4 h-4 mr-2" />
-                    Refresh
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Tab Navigation */}
-          <div className="border-b border-slate-800 bg-slate-900/30">
-            <div className="px-6">
-              <div className="flex gap-6">
-            {[
-              { id: 'overview', label: 'Overview' },
-              { id: 'threats', label: 'Threat Intelligence' },
-              { id: 'analytics', label: 'Analytics' },
-              { id: 'scanners', label: 'Scanners' },
-              { id: 'permissions', label: 'Roles & Permissions' },
-            ].map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id as any)}
-                    className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
-                      activeTab === tab.id
-                        ? 'border-cyan-500 text-cyan-400'
-                        : 'border-transparent text-slate-400 hover:text-slate-300'
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Threat Velocity Indicator - Only show on overview tab */}
-          {activeTab === 'overview' && (
-            <div className={`px-4 py-3 rounded-lg border ${
-              threatVelocity.isSpike 
-                ? 'bg-red-500/10 border-red-500/30' 
-                : threatVelocity.percentageChange < 0 
-                  ? 'bg-green-500/10 border-green-500/30'
-                  : 'bg-blue-500/10 border-blue-500/30'
-            }`}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className={`w-3 h-3 rounded-full ${
-                    threatVelocity.isSpike 
-                      ? 'bg-red-500 animate-pulse' 
-                      : threatVelocity.percentageChange < 0 
-                        ? 'bg-green-500'
-                        : 'bg-blue-500'
-                  }`} />
-                  <div>
-                    <p className={`text-sm font-medium ${
-                      threatVelocity.isSpike 
-                        ? 'text-red-400' 
-                        : threatVelocity.percentageChange < 0 
-                          ? 'text-green-400'
-                          : 'text-blue-400'
-                    }`}>
-                      {threatVelocity.displayText}
-                    </p>
-                    <p className="text-xs text-slate-400">
-                      High-risk alerts: {threatVelocity.current24h} (24h) vs {threatVelocity.previous24h} (prev 24h)
-                    </p>
-                  </div>
-                </div>
-                <div className={`flex items-center gap-1 text-sm ${
-                  threatVelocity.isSpike 
-                    ? 'text-red-400' 
-                    : threatVelocity.percentageChange < 0 
-                      ? 'text-green-400'
-                      : 'text-blue-400'
-                }`}>
-                  {threatVelocity.percentageChange > 0 ? (
-                    <TrendingUp className="w-4 h-4" />
-                  ) : (
-                    <TrendingUp className="w-4 h-4 rotate-180" />
-                  )}
-                  {Math.abs(threatVelocity.percentageChange).toFixed(1)}%
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Key Metrics - Only show on overview tab */}
-          {activeTab === 'overview' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2" style={{ width: '100%' }}>
-        {statCards.map((stat, index) => {
-          const colors = getColorClasses(stat.color);
-          return (
-            <PremiumCard key={index} className="group hover-glow" glowColor="cyan">
-              <PremiumCardContent className="pt-6">
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className={`p-3 rounded-lg ${colors.bg} border ${colors.border}`}>
-                      <div className={colors.icon}>{stat.icon}</div>
-                    </div>
-                    {stat.trend && (
-                      <div className={`text-sm font-semibold ${stat.trend > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {stat.trend > 0 ? '↑' : '↓'} {Math.abs(stat.trend)}%
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-slate-400 text-sm">{stat.title}</p>
-                    <p className="text-3xl font-bold text-white mt-1">{stat.value}</p>
-                    <p className="text-xs text-slate-500 mt-1">{stat.subtitle}</p>
-                  </div>
-                </div>
-              </PremiumCardContent>
-            </PremiumCard>
-          );
-        })}
-      </div>
-      )}
-
-      {/* Notifications Feed - Only on overview */}
-      {activeTab === 'overview' && (
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 mb-2" style={{ width: '100%' }}>
-        <div className="lg:col-span-2">
-          <NotificationsFeed />
-        </div>
+    <div className="p-6 space-y-6 bg-slate-950 min-h-screen text-white">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div>
-          <AlertPanel maxAlerts={5} />
+          <h1 className="text-3xl font-bold">Admin Dashboard</h1>
+          <p className="text-slate-400">
+            Enterprise Threat Intelligence Control Center
+          </p>
+        </div>
+
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setSidebarOpen(true)}
+            className="relative"
+          >
+            <Bell className="w-4 h-4 mr-2" />
+            Notifications
+            {notificationSummary.activeNotifications > 0 && (
+              <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center">
+                {notificationSummary.activeNotifications > 99 ? '99+' : notificationSummary.activeNotifications}
+              </span>
+            )}
+          </Button>
+
+          <Button
+            variant="outline"
+            onClick={boot}
+          >
+            <RefreshCw className="w-4 h-4 mr-2" />
+            Refresh
+          </Button>
+
+          <Button
+            onClick={handleRetrain}
+            disabled={retraining}
+          >
+            <Bot className="w-4 h-4 mr-2" />
+            {retraining ? 'Retraining...' : 'Retrain ML'}
+          </Button>
         </div>
       </div>
-      )}
-      {/* Tab Content */}
+
+      {/* Tabs */}
+      <div className="flex gap-5 border-b border-slate-800 pb-2 overflow-x-auto">
+        {[
+          'overview',
+          'agent',
+          'risk',
+          'attack-map',
+          'policies',
+          'insights',
+          'threats',
+          'analytics',
+          'scanners',
+          'permissions',
+        ].map((tab) => (
+           <button
+            key={tab}
+            onClick={() =>
+              setActiveTab(tab as DashboardTab)
+            }
+            className={`capitalize pb-2 text-sm ${
+              activeTab === tab
+                ? 'text-cyan-400 border-b-2 border-cyan-400'
+                : 'text-slate-400'
+            }`}
+          >
+            {tab.replace('-', ' ')}
+          </button>
+        ))}
+      </div>
+
+      {/* OVERVIEW */}
       {activeTab === 'overview' && (
-        <div className="space-y-2" style={{ width: '100%' }}>
-          {/* Model Metrics */}
-          <PremiumCard>
-            <PremiumCardHeader>
-              <PremiumCardTitle className="flex items-center gap-2">
-                <Shield className="w-5 h-5 text-cyan-400" />
-                Model Performance Metrics
-              </PremiumCardTitle>
-            </PremiumCardHeader>
-            <PremiumCardContent>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {[
-                  { label: 'Precision', value: Math.round((stats?.model_metrics?.precision || 0) * 100), color: 'cyan' },
-                  { label: 'Recall', value: Math.round((stats?.model_metrics?.recall || 0) * 100), color: 'orange' },
-                  { label: 'F1 Score', value: Math.round((stats?.model_metrics?.f1_score || 0) * 100), color: 'blue' },
-                  { label: 'Samples', value: stats?.model_metrics?.total_samples || 0, color: 'purple' },
-                ].map((metric, idx) => {
-                  const colors = getColorClasses(metric.color);
-                  return (
-                    <div key={idx} className={`p-4 rounded-lg border ${colors.bg} ${colors.border}`}>
-                      <p className="text-sm text-slate-400 mb-2">{metric.label}</p>
-                      <p className={`text-2xl font-bold ${colors.text}`}>{metric.value}{metric.label !== 'Samples' ? '%' : ''}</p>
-                    </div>
-                  );
-                })}
+        <>
+          {/* Threat Velocity */}
+          <div
+            className={`rounded-xl p-4 border ${
+              threatVelocity.spike
+                ? 'border-red-500 bg-red-500/10'
+                : 'border-cyan-500 bg-cyan-500/10'
+            }`}
+          >
+            <div className="flex justify-between">
+              <div>
+                <p className="font-semibold">
+                  Threat Velocity
+                </p>
+                <p className="text-sm text-slate-300">
+                  24h: {threatVelocity.current24} alerts vs{' '}
+                  {threatVelocity.previous24}
+                </p>
               </div>
-            </PremiumCardContent>
-          </PremiumCard>
 
-          {/* Charts Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-2" style={{ width: '100%' }}>
-            <div className="lg:col-span-2 space-y-2">
-              {/* Trend Chart */}
-              <PremiumCard>
-                <PremiumCardHeader>
-                  <PremiumCardTitle>Fraud Detection Trends</PremiumCardTitle>
-                </PremiumCardHeader>
-                <PremiumCardContent>
-                  <ResponsiveContainer width="100%" height={250}>
-                    <AreaChart data={trendData}>
-                      <defs>
-                        <linearGradient id="colorFlagged" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#ef4444" stopOpacity={0.8}/>
-                          <stop offset="95%" stopColor="#ef4444" stopOpacity={0.1}/>
-                        </linearGradient>
-                        <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.8}/>
-                          <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.1}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,116,139,0.1)" />
-                      <XAxis dataKey="day" stroke="#64748b" />
-                      <YAxis stroke="#64748b" />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: 'rgba(15, 23, 41, 0.8)',
-                          border: '1px solid rgba(0, 212, 255, 0.2)',
-                          borderRadius: '8px',
-                        }}
-                        labelStyle={{ color: '#f1f5f9' }}
-                      />
-                      <Area type="monotone" dataKey="flagged" stroke="#ef4444" strokeWidth={2} fillOpacity={1} fill="url(#colorFlagged)" name="Flagged" />
-                      <Area type="monotone" dataKey="total" stroke="#06b6d4" strokeWidth={2} fillOpacity={1} fill="url(#colorTotal)" name="Total" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </PremiumCardContent>
-              </PremiumCard>
-
-              {/* Department Statistics */}
-              <PremiumCard>
-                <PremiumCardHeader>
-                  <PremiumCardTitle>Department Risk Analysis</PremiumCardTitle>
-                </PremiumCardHeader>
-                <PremiumCardContent>
-                  <ResponsiveContainer width="100%" height={280}>
-                    <BarChart data={deptData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,116,139,0.1)" />
-                      <XAxis dataKey="department" stroke="#64748b" />
-                      <YAxis stroke="#64748b" />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: 'rgba(15, 23, 41, 0.8)',
-                          border: '1px solid rgba(0, 212, 255, 0.2)',
-                          borderRadius: '8px',
-                        }}
-                        labelStyle={{ color: '#f1f5f9' }}
-                      />
-                      <Bar dataKey="total" fill="#3b82f6" name="Total" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="flagged" fill="#ef4444" name="Flagged" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </PremiumCardContent>
-              </PremiumCard>
-            </div>
-
-            {/* Distribution Pie Chart */}
-            <div className="space-y-2">
-              <PremiumCard>
-                <PremiumCardHeader>
-                  <PremiumCardTitle>Detection Distribution</PremiumCardTitle>
-                </PremiumCardHeader>
-                <PremiumCardContent>
-                  <ResponsiveContainer width="100%" height={220}>
-                    <PieChart>
-                      <Pie
-                        data={pieData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={50}
-                        outerRadius={70}
-                        paddingAngle={5}
-                        dataKey="value"
-                      >
-                        {pieData.map((_, index) => (
-                          <Cell key={`cell-${index}`} fill={index === 0 ? '#ef4444' : '#22c55e'} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: 'rgba(15, 23, 41, 0.8)',
-                          border: '1px solid rgba(0, 212, 255, 0.2)',
-                          borderRadius: '8px',
-                        }}
-                        labelStyle={{ color: '#f1f5f9' }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="flex flex-col gap-3 mt-4">
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-red-500/10 border border-red-500/20">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-red-500" />
-                        <span className="text-sm text-slate-300">Flagged</span>
-                      </div>
-                      <span className="text-sm font-semibold text-red-400">{stats?.flagged_notifications || 0}</span>
-                    </div>
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-green-500/10 border border-green-500/20">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-green-500" />
-                        <span className="text-sm text-slate-300">Benign</span>
-                      </div>
-                      <span className="text-sm font-semibold text-green-400">{stats?.benign_notifications || 0}</span>
-                    </div>
-                  </div>
-                </PremiumCardContent>
-              </PremiumCard>
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-4 h-4" />
+                {Math.abs(
+                  threatVelocity.percentage
+                ).toFixed(1)}
+                %
+              </div>
             </div>
           </div>
+
+          {/* Metric Cards */}
+          <div className="grid md:grid-cols-4 gap-4">
+            <MetricCard
+              title="Total Alerts"
+              value={stats?.totalAlerts ?? 0}
+              icon={<Activity />}
+            />
+            <MetricCard
+              title="Flagged"
+              value={stats?.flagged ?? 0}
+              icon={<AlertTriangle />}
+            />
+            <MetricCard
+              title="Benign"
+              value={stats?.benign ?? 0}
+              icon={<CheckCircle />}
+            />
+            <MetricCard
+              title="Accuracy"
+              value={`${Math.round(
+                (stats?.model_metrics?.accuracy ?? 0) * 100
+              )}%`}
+              icon={<Shield />}
+            />
+          </div>
+
+          {/* Feed */}
+          <div className="grid lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2">
+              <NotificationsFeed />
+            </div>
+            <AlertPanel maxAlerts={5} />
+          </div>
+
+          {/* Charts */}
+          <div className="grid lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2 bg-slate-900 rounded-xl p-4">
+              <h3 className="mb-4 font-semibold">
+                Detection Trends
+              </h3>
+
+              <ResponsiveContainer
+                width="100%"
+                height={260}
+              >
+                <AreaChart data={trendData}>
+                  <CartesianGrid stroke="#1e293b" />
+                  <XAxis dataKey="day" />
+                  <YAxis />
+                  <Tooltip />
+                  <Area
+                    dataKey="total"
+                    stroke="#06b6d4"
+                    fill="#06b6d4"
+                    fillOpacity={0.15}
+                  />
+                  <Area
+                    dataKey="flagged"
+                    stroke="#ef4444"
+                    fill="#ef4444"
+                    fillOpacity={0.2}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="bg-slate-900 rounded-xl p-4">
+              <h3 className="mb-4 font-semibold">
+                Detection Split
+              </h3>
+
+              <ResponsiveContainer
+                width="100%"
+                height={260}
+              >
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    dataKey="value"
+                    outerRadius={80}
+                  >
+                    {pieData.map((_, i) => (
+                      <Cell
+                        key={i}
+                        fill={COLORS[i]}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Department Chart */}
+          <div className="bg-slate-900 rounded-xl p-4">
+            <h3 className="mb-4 font-semibold">
+              Department Risk Analysis
+            </h3>
+
+            <ResponsiveContainer
+              width="100%"
+              height={300}
+            >
+              <BarChart data={deptData}>
+                <CartesianGrid stroke="#1e293b" />
+                <XAxis dataKey="department" />
+                <YAxis />
+                <Tooltip />
+                <Bar
+                  dataKey="total"
+                  fill="#3b82f6"
+                />
+                <Bar
+                  dataKey="flagged"
+                  fill="#ef4444"
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Exports */}
+          <div className="flex gap-3">
+            <Button
+              onClick={() => handleExport('csv')}
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Export CSV
+            </Button>
+
+            <Button
+              variant="outline"
+              onClick={() => handleExport('json')}
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Export JSON
+            </Button>
+          </div>
+        </>
+      )}
+
+      {activeTab === 'agent' && (
+        <div className="space-y-4">
+          <AutonomousAgentPanel />
+          <AgentActivityLog />
         </div>
       )}
 
-      {/* Tab Content - Additional tabs */}
-      {activeTab === 'threats' && <ThreatPatterns />}
-      {activeTab === 'analytics' && <AnalyticsPanel />}
-      {activeTab === 'scanners' && <ScannerTools />}
-      {activeTab === 'permissions' && <AdminRolesPanel />}
+      {activeTab === 'risk' && (
+        <AdminRiskManagement />
+      )}
+
+      {activeTab === 'attack-map' && (
+        <LiveAttackMap />
+      )}
+
+      {activeTab === 'policies' && (
+        <PolicyManagement />
+      )}
+
+      {activeTab === 'insights' && (
+        <InsightsPanel />
+      )}
+
+      {activeTab === 'threats' && (
+        <ThreatPatterns />
+      )}
+
+      {activeTab === 'analytics' && (
+        <AnalyticsPanel />
+      )}
+
+      {activeTab === 'scanners' && (
+        <ScannerTools />
+      )}
+
+      {activeTab === 'permissions' && (
+        <AdminRolesPanel />
+      )}
+
+      {/* Sidebar Notifications */}
+      <SidebarNotifications 
+        isOpen={sidebarOpen} 
+        onClose={() => setSidebarOpen(false)} 
+      />
+
+      {/* Real-time Alerts */}
+      <LiveAlertContainer 
+        alerts={alerts} 
+        onRemoveAlert={removeAlert} 
+      />
+    </div>
+  );
+}
+
+function MetricCard({
+  title,
+  value,
+  icon,
+}: {
+  title: string;
+  value: string | number;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div className="bg-slate-900 rounded-xl p-5 border border-slate-800">
+      <div className="flex justify-between mb-4">
+        <div className="text-slate-400 text-sm">
+          {title}
+        </div>
+        <div className="text-cyan-400">{icon}</div>
+      </div>
+
+      <div className="text-3xl font-bold">
+        {value}
       </div>
     </div>
   );

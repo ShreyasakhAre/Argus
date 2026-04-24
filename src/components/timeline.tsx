@@ -29,11 +29,15 @@ export function Timeline({ notificationId, maxEvents = 10 }: TimelineProps) {
 
   const fetchTimeline = async () => {
     const url = notificationId 
-      ? `/api/timeline?notification_id=${notificationId}`
-      : '/api/timeline';
+      ? `/api/alerts/timeline?notification_id=${notificationId}`
+      : '/api/alerts/timeline';
     const res = await fetch(url);
     const data = await res.json();
-    setEvents(data.events.slice(0, maxEvents));
+    if (data.success && data.data && data.data.events) {
+      setEvents(data.data.events.slice(0, maxEvents));
+    } else {
+      setEvents([]);
+    }
     setLoading(false);
   };
 

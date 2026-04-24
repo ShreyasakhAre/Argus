@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { analyzeNotification } = require("./aiService");
 
 const dataPath = path.resolve(__dirname, "..", "data", "alerts.json");
 
@@ -61,16 +62,40 @@ async function createAlert(payload) {
     throw new Error("Alert message is required.");
   }
 
+  // Use AI service for analysis
+  let aiAnalysis = { riskScore: 0, explanation: [], source: 'none' };
+  try {
+    aiAnalysis = await analyzeNotification(payload);
+  } catch (error) {
+    console.warn('AI analysis failed, using basic detection:', error.message);
+  }
+
+  // Convert AI risk score to severity
+  let detectedSeverity = 'low';
+  if (aiAnalysis.riskScore >= 70) {
+    detectedSeverity = 'critical';
+  } else if (aiAnalysis.riskScore >= 50) {
+    detectedSeverity = 'high';
+  } else if (aiAnalysis.riskScore >= 30) {
+    detectedSeverity = 'medium';
+  }
+
   const newAlert = {
     id: payload.id || payload.legacyId || createLegacyId(),
     type: payload.type || "new_threat",
-    severity: payload.severity || "medium",
+    severity: payload.severity || detectedSeverity,
     message: payload.message.trim(),
     status: payload.status || (payload.acknowledged ? "acknowledged" : "pending"),
     timestamp: payload.timestamp ? new Date(payload.timestamp).toISOString() : new Date().toISOString(),
     acknowledged: payload.acknowledged || false,
     notification_id: payload.notification_id || null,
-    details: payload.details || {},
+    details: {
+      ...payload.details,
+      aiAnalysis: aiAnalysis,
+      riskScore: aiAnalysis.riskScore,
+      explanation: aiAnalysis.explanation,
+      analysisSource: aiAnalysis.source
+    },
   };
 
   const data = readData();

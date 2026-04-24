@@ -46,7 +46,6 @@ export function NotificationToastSystem({ className }: NotificationToastSystemPr
   const { role } = useRole();
   const { user } = useAuth();
   const [toasts, setToasts] = useState<ToastNotification[]>([]);
-  const [socket, setSocket] = useState<any>(null);
 
   // Get severity color
   const getSeverityColor = (severity: NotificationSeverity) => {
@@ -96,53 +95,32 @@ export function NotificationToastSystem({ className }: NotificationToastSystemPr
     return true;
   }, [user, role]);
 
-  // Initialize socket connection
+  // Listen to centralized notification events from NotificationProvider.
   useEffect(() => {
-    const initSocket = async () => {
-      try {
-        const { io } = await import('socket.io-client');
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://argus-backend.onrender.com";
-        const socketInstance = io(backendUrl, {
-          transports: ["websocket"]
-        });
+    const onNewAlert = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const payload = customEvent.detail as NotificationEventPayload;
 
-        socketInstance.on('connect', () => {
-          console.log('🟢 Connected to notification server');
-        });
+      if (!payload || !isNotificationRelevant(payload)) return;
 
-        socketInstance.on('disconnect', () => {
-          console.log('🔴 Disconnected from notification server');
-        });
+      const notificationSource = payload.notification as any;
+      const notification = ((notificationSource?.notification || notificationSource || {}) as Notification);
+      const newToast: ToastNotification = {
+        id: Math.random().toString(36).slice(2, 11),
+        notification,
+        severity: payload.severity || 'medium',
+        timestamp: payload.timestamp ? new Date(payload.timestamp) : new Date(),
+        isPaused: false,
+      };
 
-        socketInstance.on('new_alert', (payload: NotificationEventPayload) => {
-          if (isNotificationRelevant(payload)) {
-            const newToast: ToastNotification = {
-              id: Math.random().toString(36).substr(2, 9),
-              notification: payload.notification as unknown as Notification,
-              severity: payload.severity,
-              timestamp: new Date(payload.timestamp),
-              isPaused: false
-            };
-
-            setToasts(prev => {
-              const updated = [newToast, ...prev];
-              return updated.slice(0, 4); // Limit to 4 toasts
-            });
-          }
-        });
-
-        setSocket(socketInstance);
-      } catch (error) {
-        console.error('Failed to initialize socket:', error);
-      }
+      // Keep one active toast to avoid blocking layouts.
+      setToasts([newToast]);
     };
 
-    initSocket();
+    window.addEventListener('new_alert', onNewAlert as EventListener);
 
     return () => {
-      if (socket) {
-        socket.disconnect();
-      }
+      window.removeEventListener('new_alert', onNewAlert as EventListener);
     };
   }, [isNotificationRelevant]);
 
@@ -186,83 +164,86 @@ export function NotificationToastSystem({ className }: NotificationToastSystemPr
   if (toasts.length === 0) return null;
 
   return (
-    <div className={`fixed bottom-4 right-4 z-50 space-y-3 ${className}`}>
-      {toasts.map((toast) => (
-        <div
-          key={toast.id}
-          className={`
-            bg-zinc-900 border border-zinc-700 rounded-lg shadow-lg
-            w-96 max-w-sm p-4 transform transition-all duration-300
-            hover:scale-105 hover:shadow-xl
-            ${toast.isPaused ? 'scale-105' : ''}
-          `}
-          onMouseEnter={() => togglePause(toast.id, true)}
-          onMouseLeave={() => togglePause(toast.id, false)}
-        >
-          <div className="flex items-start gap-3">
-            {/* Icon */}
-            <div className={`p-2 rounded-lg border ${getSeverityColor(toast.severity)}`}>
-              {getSeverityIcon(toast.severity)}
-            </div>
-
-            {/* Content */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between mb-2">
-                <Badge className={getSeverityColor(toast.severity)}>
-                  {toast.severity.toUpperCase()}
-                </Badge>
-                <div className="flex items-center gap-2">
-                  <Clock className="w-3 h-3 text-zinc-400" />
-                  <span className="text-xs text-zinc-400">
-                    {new Date(toast.timestamp).toLocaleTimeString()}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeToast(toast.id)}
-                    className="h-6 w-6 p-0 text-zinc-400 hover:text-white"
-                  >
-                    <X className="w-3 h-3" />
-                  </Button>
-                </div>
+    <div className={`fixed top-4 right-4 z-50 max-w-sm max-h-96 overflow-hidden pointer-events-none ${className || ''}`}>
+      <div className="space-y-2 pointer-events-auto">
+        {toasts.slice(0, 1).map((toast) => (
+          <div
+            key={toast.id}
+            className={`
+              bg-slate-900/95 backdrop-blur-sm border rounded-lg shadow-lg p-3
+              transition-all duration-300 transform hover:scale-[1.02]
+              max-w-xs pointer-events-auto
+              ${toast.isPaused ? 'opacity-70 scale-95' : 'opacity-100'}
+              ${getSeverityColor(toast.severity)}
+            `}
+            onMouseEnter={() => togglePause(toast.id, true)}
+            onMouseLeave={() => togglePause(toast.id, false)}
+          >
+            <div className="flex items-start gap-2">
+              {/* Icon */}
+              <div className={`p-1.5 rounded border flex-shrink-0 ${getSeverityColor(toast.severity)}`}>
+                {getSeverityIcon(toast.severity)}
               </div>
 
-              <div className="space-y-2">
-                {/* Sender and Source */}
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-zinc-300 font-medium">
-                    {toast.notification.sender || 'Unknown'}
-                  </span>
-                  {toast.notification.source_app && (
-                    <div className="flex items-center gap-1">
-                      {sourceAppIcons[toast.notification.source_app]}
-                      <span className="text-xs text-zinc-400">
-                        {toast.notification.source_app}
-                      </span>
-                    </div>
-                  )}
+              {/* Content */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between mb-1">
+                  <Badge className={`text-xs px-1.5 py-0.5 ${getSeverityColor(toast.severity)}`}>
+                    {toast.severity.toUpperCase()}
+                  </Badge>
+                  <div className="flex items-center gap-1">
+                    <Clock className="w-2.5 h-2.5 text-zinc-400" />
+                    <span className="text-xs text-zinc-400">
+                      {new Date(toast.timestamp).toLocaleTimeString()}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeToast(toast.id)}
+                      className="h-5 w-5 p-0 text-zinc-400 hover:text-white"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </Button>
+                  </div>
                 </div>
 
-                {/* Content Preview */}
-                <p className="text-sm text-zinc-300 line-clamp-2">
-                  {toast.notification.content || 'New notification'}
-                </p>
+                <div className="space-y-1">
+                  {/* Sender and Source */}
+                  <div className="flex items-center gap-1.5 text-xs">
+                    <span className="text-zinc-300 font-medium truncate">
+                      {toast.notification.sender || 'Unknown'}
+                    </span>
+                    {toast.notification.source_app && (
+                      <div className="flex items-center gap-0.5">
+                        {sourceAppIcons[toast.notification.source_app]}
+                        <span className="text-xs text-zinc-400">
+                          {toast.notification.source_app}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Content Preview */}
+                  <p className="text-xs text-zinc-300 line-clamp-2">
+                    {toast.notification.content || 'New notification'}
+                  </p>
+                </div>
 
                 {/* Action Button */}
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => navigateToNotification(toast.notification)}
-                  className="w-full mt-2 border-zinc-600 hover:bg-zinc-800 text-xs"
+                  className="w-full mt-1.5 border-zinc-600 hover:bg-zinc-800 text-xs h-6"
                 >
-                  <Eye className="w-3 h-3 mr-2" />
-                  View Details
+                  <Eye className="w-2.5 h-2.5 mr-1" />
+                  View
                 </Button>
               </div>
             </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
