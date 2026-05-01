@@ -65,7 +65,7 @@ export function useNotificationBulkSelect(notifications: Notification[]) {
   const notSafeCount = notSafeItems.length;
 
   const allNotSafeSelected = useMemo(
-    () => notSafeCount > 0 && notSafeItems.every((n) => selectedIds.has(n.notification_id)),
+    () => notSafeCount > 0 && notSafeItems.every((n) => selectedIds.has(n.id || n.notification_id)),
     [notSafeItems, notSafeCount, selectedIds]
   );
 
@@ -81,15 +81,34 @@ export function useNotificationBulkSelect(notifications: Notification[]) {
   }, []);
 
   const selectAllNotSafe = useCallback(() => {
-    setSelectedIds(new Set(notSafeItems.map((n) => n.notification_id)));
+    setSelectedIds(new Set(notSafeItems.map((n) => n.id || n.notification_id)));
   }, [notSafeItems]);
 
   const deselectAll = useCallback(() => {
     setSelectedIds(new Set());
   }, []);
 
-  const handleBulkAction = useCallback((action: string) => {
+  const handleBulkAction = useCallback(async (action: string) => {
     const count = selectedIds.size;
+    const ids = Array.from(selectedIds);
+    
+    // Send feedback for each selected item
+    try {
+      await Promise.all(ids.map(id => 
+        fetch('/api/analyst-feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            notification_id: id,
+            action: action.toUpperCase().replace(/\s+/g, '_'),
+            analyst: 'Analyst (Bulk)'
+          })
+        })
+      ));
+    } catch (err) {
+      console.error("Bulk feedback error:", err);
+    }
+
     setFeedback(`${action}: ${count} notification${count !== 1 ? 's' : ''} processed`);
     setSelectedIds(new Set());
     setTimeout(() => setFeedback(null), 3000);

@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { io } from 'socket.io-client';
 import { Bell, AlertTriangle, Shield, Zap, CheckCircle, X, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SeverityBadge, SeverityIndicator } from '@/components/ui/severity-badge';
 import { PremiumCard, PremiumCardHeader, PremiumCardTitle, PremiumCardContent } from '@/components/ui/premium-card';
 import type { Alert } from '@/lib/alert-types';
+import { initSocketConnection } from '@/lib/socket';
 
 interface AlertPanelProps {
   maxAlerts?: number;
@@ -21,13 +21,12 @@ const severityConfig = {
 };
 
 export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) {
-  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [liveAlerts, setLiveAlerts] = useState<any[]>([]); // Using any[] to safely handle direct socket payload
   const [unacknowledged, setUnacknowledged] = useState(0);
   const [loading, setLoading] = useState(true);
   const [socketStatus, setSocketStatus] = useState("Disconnected");
   const [apiStatus, setApiStatus] = useState("Connected");
   const handlerRef = useRef<((e: Event) => void) | null>(null);
-  const fetchIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/alerts` || "https://argus-backend.onrender.com/api/alerts";
   
@@ -53,9 +52,9 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
       
       // Ensure data compatibility matching previous JSON shape cleanly
       const alertsArray = data.alerts || data.data?.alerts || [];
-      const criticalAlerts = alertsArray.filter((alert: Alert) => alert.severity === 'critical');
+      const criticalAlerts = alertsArray.filter((alert: any) => alert.severity === 'critical');
       
-      setAlerts(criticalAlerts.slice(0, showAll ? undefined : maxAlerts));
+      setLiveAlerts(criticalAlerts.slice(0, showAll ? undefined : maxAlerts));
       setUnacknowledged(data.unacknowledged || 0);
       setLoading(false);
     } catch (err) {
@@ -80,11 +79,12 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
       if (!res.ok) throw new Error('Backend API acknowledge failed');
       
       console.log("🟢 Data Source: API (Ack Success)");
-      await fetchAlerts();
+      setLiveAlerts(prev => prev.map(a => (a.id === alertId || a._id === alertId) ? { ...a, acknowledged: true } : a));
+      setUnacknowledged(prev => Math.max(0, prev - 1));
     } catch (err) {
       console.error('🔴 Failed to acknowledge alert via Backend API:', err);
     }
-  }, [fetchAlerts]);
+  }, [API_URL]);
 
   const formatTime = useCallback((timestamp?: string | Date | number) => {
     if (!timestamp) return 'just now';
@@ -104,23 +104,13 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
     fetchAlerts();
   }, [fetchAlerts]);
 
-  // Periodic refresh (every 30 seconds)
-  useEffect(() => {
-    fetchIntervalRef.current = setInterval(fetchAlerts, 30000);
-    return () => {
-      if (fetchIntervalRef.current) {
-        clearInterval(fetchIntervalRef.current);
-      }
-    };
-  }, [fetchAlerts]);
+  // Periodic refresh REMOVED - strictly socket-driven
 
   // Socket.io real-time listener for Express events
   useEffect(() => {
-    // Enforcing strict WebSocket transport as requested via Prod ENV
-    const socket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "https://argus-backend.onrender.com", {
-      transports: ["websocket"],
-    });
+    const socket = initSocketConnection();
     
+    if (socket.connected) setSocketStatus("Connected");
     socket.on("connect", () => {
       console.log("✅ SOCKET CONNECTED:", socket.id);
       setSocketStatus("Connected");
@@ -136,20 +126,21 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
       setSocketStatus("Disconnected");
     });
     
-    socket.on("disconnect", () => {
-      console.log("⚠️ Socket disconnected");
-      setSocketStatus("Disconnected");
-    });
-    
-    socket.on("new_alert", (eventData) => {
-      console.log("New alert received:", eventData);
+    const handleAlert = (eventData: any) => {
+      console.log("🚨 LIVE ALERT RECEIVED:", eventData);
       
       if (eventData) {
-        setAlerts(prev => {
-          // Idempotency check to avoid duplicate injections on React Strict Mode
-          if (prev.some(a => a.id === eventData.id || (eventData._id && a._id === eventData._id))) return prev;
-          return [eventData, ...prev].slice(0, 20);
-        });
+        const alert = eventData.detail?.notification || eventData.notification || eventData.detail || eventData;
+          setLiveAlerts(prev => {
+            // Idempotency check to avoid duplicate injections
+            if (prev.some(a => (a.id && a.id === alert.id) || (a._id && a._id === alert._id))) return prev;
+            const next = [alert, ...prev];
+            // Sort by severity (critical first)
+            return next.sort((a, b) => {
+              const order = { critical: 0, high: 1, medium: 2, low: 3 };
+              return (order[a.severity as keyof typeof order] ?? 4) - (order[b.severity as keyof typeof order] ?? 4);
+            }).slice(0, 50);
+          });
         
         if (
           eventData.type === "new" ||
@@ -157,13 +148,22 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
         ) {
           setUnacknowledged(prev => prev + 1);
         }
-      } else {
-        fetchAlerts();
       }
-    });
+    };
+
+    socket.on("new_alert", handleAlert);
+    window.addEventListener("new_alert", handleAlert);
+
+    if (!socket.connected) {
+      socket.connect();
+    }
 
     return () => {
-      socket.disconnect();
+      socket.off("connect");
+      socket.off("connect_error");
+      socket.off("disconnect");
+      socket.off("new_alert", handleAlert);
+      window.removeEventListener("new_alert", handleAlert);
     };
   }, [showAll, fetchAlerts]);
 
@@ -187,9 +187,10 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
       {/* Temporary Full System Debug Panel */}
       <div className="absolute top-2 right-2 bg-slate-950/90 border border-slate-700 p-3 rounded shadow-2xl z-50 text-[10px] font-mono flex flex-col gap-1 backdrop-blur-sm">
         <div className="font-bold text-slate-300 border-b border-slate-700 pb-1 mb-1">SYSTEM DIAGNOSTIC</div>
-        <div className="flex justify-between gap-4"><span className="text-slate-500">Data Source:</span><span className="text-cyan-400">MONGODB</span></div>
+        <div className="flex justify-between gap-4"><span className="text-slate-500">Data Source:</span><span className="text-cyan-400">SOCKET.IO</span></div>
         <div className="flex justify-between gap-4"><span className="text-slate-500">API Status:</span><span className={apiStatus === 'Connected' ? 'text-green-400' : 'text-red-400'}>{apiStatus}</span></div>
         <div className="flex justify-between gap-4"><span className="text-slate-500">Socket.io:</span><span className={socketStatus === 'Connected' ? 'text-green-400' : 'text-orange-400'}>{socketStatus}</span></div>
+        <div className="flex justify-between gap-4"><span className="text-slate-500">Total Alerts:</span><span className="text-yellow-400">{liveAlerts.length}</span></div>
       </div>
   
       <PremiumCardHeader className="pb-4">
@@ -206,7 +207,7 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
               )}
             </div>
             <div>
-              <PremiumCardTitle className="text-base flex items-center gap-2">Live Alerts <span className="text-[9px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded border border-green-500/30 font-bold uppercase tracking-wider hidden sm:inline-block">Data Source: API</span></PremiumCardTitle>
+              <PremiumCardTitle className="text-base flex items-center gap-2">Live Alerts <span className="text-[9px] bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded border border-cyan-500/30 font-bold uppercase tracking-wider hidden sm:inline-block">Data Source: SOCKET</span></PremiumCardTitle>
               <p className="text-xs text-slate-400">Security event stream</p>
             </div>
           </div>
@@ -214,7 +215,7 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
       </PremiumCardHeader>
 
       <PremiumCardContent className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
-        {alerts.length === 0 ? (
+        {liveAlerts.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="w-12 h-12 rounded-lg bg-slate-800/50 flex items-center justify-center mb-3">
               <CheckCircle className="w-6 h-6 text-green-500" />
@@ -224,13 +225,13 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
           </div>
         ) : (
           <div className="space-y-2">
-            {alerts.map((alert) => {
-              const config = severityConfig[alert.severity as keyof typeof severityConfig];
-              const Icon = config.icon;
+            {liveAlerts.map((alert, index) => {
+              const config = severityConfig[alert.severity as keyof typeof severityConfig] || severityConfig.low;
+              const Icon = config.icon || Bell;
 
               return (
                 <div
-                  key={alert.id}
+                  key={`${alert.id || alert._id || 'alert'}-${index}`}
                   className={`
                     alert-card group relative p-4 rounded-lg border transition-all duration-300
                     ${

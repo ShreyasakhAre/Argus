@@ -1,7 +1,7 @@
 import React from 'react';
 import { Shield } from 'lucide-react';
 import { AdminDashboard } from "@/components/dashboards/admin-dashboard";
-import { AnalystDashboard } from "@/components/dashboards/analyst-dashboard";
+import { FraudAnalystDashboard } from "@/components/dashboards/fraud-analyst-dashboard";
 import { AuditorDashboard } from "@/components/dashboards/auditor-dashboard";
 import { DepartmentHeadDashboard } from "@/components/dashboards/department-dashboard";
 import { EmployeeDashboard } from "@/components/dashboards/employee-dashboard";
@@ -23,9 +23,9 @@ export function getDashboardByRole(role: string) {
     case "admin":
       return <AdminDashboard />;
     case "analyst":
-      return <AnalystDashboard />;
+      return <FraudAnalystDashboard />;
     case "fraud_analyst":
-      return <AnalystDashboard />;
+      return <FraudAnalystDashboard />;
     case "auditor":
       return <AuditorDashboard />;
     case "department_head":

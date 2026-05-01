@@ -10,6 +10,8 @@ import { Shield, Eye, Activity, RefreshCw, LogOut, Sun, Moon } from 'lucide-reac
 import { Sidebar } from '@/components/layout/sidebar';
 import NotificationBell from "@/components/ui/NotificationBell";
 import { GlobalNotificationToast } from '@/components/common/global-notification-toast';
+import { RoleSelector } from '@/components/role-selector';
+import { SocketStatus } from '@/components/ui/socket-status';
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -94,6 +96,9 @@ export function DashboardLayout({
                   <Activity className="w-4 h-4 text-green-500" />
                   <span>System Online</span>
                 </div>
+                <div className="border-l border-border h-4 mx-1" />
+                <SocketStatus />
+                <div className="border-l border-border h-4 mx-1" />
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Shield className="w-4 h-4 text-primary" />
                   <span>ML Model Active</span>
@@ -101,11 +106,8 @@ export function DashboardLayout({
               </div>
 
               <div className="flex items-center gap-2 border-l border-border pl-4">
-                <Badge className={`${currentRoleConfig.bgColor} ${currentRoleConfig.color} flex items-center gap-1.5 px-3 py-1`}>
-                  {currentRoleConfig.icon}
-                  <span>{currentRoleConfig.label}</span>
-                </Badge>
-                <span className="text-sm text-muted-foreground hidden sm:inline">{user.orgId}</span>
+                <RoleSelector />
+                <span className="text-sm text-muted-foreground hidden sm:inline ml-2">{user.orgId}</span>
               </div>
 
               <NotificationBell />

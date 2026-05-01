@@ -46,7 +46,6 @@ export function NotificationToastSystem({ className }: NotificationToastSystemPr
   const { role } = useRole();
   const { user } = useAuth();
   const [toasts, setToasts] = useState<ToastNotification[]>([]);
-  const [socket, setSocket] = useState<any>(null);
 
   // Get severity color
   const getSeverityColor = (severity: NotificationSeverity) => {
@@ -96,52 +95,32 @@ export function NotificationToastSystem({ className }: NotificationToastSystemPr
     return true;
   }, [user, role]);
 
-  // Initialize socket connection
+  // Listen to the singleton socket event bridge initialized by NotificationProvider.
   useEffect(() => {
-    const initSocket = async () => {
-      try {
-        const { io } = await import('socket.io-client');
-        const socketInstance = io(process.env.NEXT_PUBLIC_BACKEND_URL || "https://argus-backend.onrender.com", {
-          transports: ['websocket', 'polling']
-        });
-
-        socketInstance.on('connect', () => {
-          console.log('🟢 Connected to notification server');
-        });
-
-        socketInstance.on('disconnect', () => {
-          console.log('🔴 Disconnected from notification server');
-        });
-
-        socketInstance.on('new_alert', (payload: NotificationEventPayload) => {
-          if (isNotificationRelevant(payload)) {
-            const newToast: ToastNotification = {
-              id: Math.random().toString(36).substr(2, 9),
-              notification: payload.notification as Notification,
-              severity: payload.severity,
-              timestamp: new Date(payload.timestamp),
-              isPaused: false
-            };
-
-            setToasts(prev => {
-              const updated = [newToast, ...prev];
-              return updated.slice(0, 4); // Limit to 4 toasts
-            });
-          }
-        });
-
-        setSocket(socketInstance);
-      } catch (error) {
-        console.error('Failed to initialize socket:', error);
+    const handleNewAlert = (event: Event) => {
+      const payload = (event as CustomEvent<NotificationEventPayload>).detail;
+      if (!payload || !isNotificationRelevant(payload)) {
+        return;
       }
+
+      const notif = payload.notification as any;
+      if (!notif.message && !notif.content) return;
+
+      const newToast: ToastNotification = {
+        id: Math.random().toString(36).slice(2, 11),
+        notification: payload.notification as unknown as Notification,
+        severity: payload.severity,
+        timestamp: new Date(payload.timestamp),
+        isPaused: false
+      };
+
+      setToasts(prev => [newToast, ...prev].slice(0, 4));
     };
 
-    initSocket();
+    window.addEventListener('new_alert', handleNewAlert as EventListener);
 
     return () => {
-      if (socket) {
-        socket.disconnect();
-      }
+      window.removeEventListener('new_alert', handleNewAlert as EventListener);
     };
   }, [isNotificationRelevant]);
 
@@ -186,9 +165,9 @@ export function NotificationToastSystem({ className }: NotificationToastSystemPr
 
   return (
     <div className={`fixed bottom-4 right-4 z-50 space-y-3 ${className}`}>
-      {toasts.map((toast) => (
+      {toasts.map((toast, idx) => (
         <div
-          key={toast.id}
+          key={`${toast.id}-${idx}`}
           className={`
             bg-zinc-900 border border-zinc-700 rounded-lg shadow-lg
             w-96 max-w-sm p-4 transform transition-all duration-300
@@ -230,13 +209,13 @@ export function NotificationToastSystem({ className }: NotificationToastSystemPr
                 {/* Sender and Source */}
                 <div className="flex items-center gap-2 text-sm">
                   <span className="text-zinc-300 font-medium">
-                    {toast.notification.sender || 'Unknown'}
+                    {toast.notification.sender || (toast.notification as any).source || 'Security Alert'}
                   </span>
-                  {toast.notification.source_app && (
+                  {(toast.notification as any).source_app && (
                     <div className="flex items-center gap-1">
-                      {sourceAppIcons[toast.notification.source_app]}
+                      {sourceAppIcons[(toast.notification as any).source_app]}
                       <span className="text-xs text-zinc-400">
-                        {toast.notification.source_app}
+                        {(toast.notification as any).source_app}
                       </span>
                     </div>
                   )}
@@ -244,7 +223,7 @@ export function NotificationToastSystem({ className }: NotificationToastSystemPr
 
                 {/* Content Preview */}
                 <p className="text-sm text-zinc-300 line-clamp-2">
-                  {toast.notification.content || 'New notification'}
+                  {(toast.notification as any).message || toast.notification.content || 'Suspicious activity detected'}
                 </p>
 
                 {/* Action Button */}

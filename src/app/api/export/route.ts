@@ -1,12 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { mockData } from '@/lib/mock-data';
+import { loadDatasetNotifications } from '@/lib/dataset-notifications';
 
 export async function GET(request: NextRequest) {
-  const searchParams = request.nextUrl.searchParams;
-  const format = (searchParams.get('format') || 'json') as 'csv' | 'json';
-  const org_id = searchParams.get('org_id') || undefined;
-  const flagged_only = searchParams.get('flagged_only') === 'true';
+  const notifications = loadDatasetNotifications();
+  const { searchParams } = new URL(request.url);
+  const orgId = searchParams.get('org_id');
   
-  const data = await mockData.exportReport(format, { org_id, flagged_only });
-  return NextResponse.json(data);
+  const filtered = orgId 
+    ? notifications.filter(n => n.org_id === orgId)
+    : notifications;
+  
+  // Generate export data from real dataset
+  const csvContent = [
+    'notification_id,org_id,department,channel,sender,receiver,content,risk_score,threat_category,is_malicious,timestamp',
+    ...filtered.map(n => 
+      `${n.notification_id},${n.org_id},${n.department},${n.channel},${n.sender},${n.receiver},"${n.content}",${n.risk_score},${n.threat_category},${n.is_malicious},${n.timestamp}`
+    )
+  ].join('\n');
+  
+  return NextResponse.json({
+    content: csvContent,
+    filename: `argus_export_${new Date().toISOString().split('T')[0]}.csv`
+  });
 }

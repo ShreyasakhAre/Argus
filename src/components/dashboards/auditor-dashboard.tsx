@@ -9,6 +9,7 @@ import { FileText, AlertTriangle, CheckCircle, Clock, RefreshCw, Eye, Mail, Mess
 import type { Notification, Feedback, SourceApp } from '@/lib/ml-service';
 import { isNotSafe } from '@/components/notification-bulk-actions';
 import { getAuditLogs, logNotificationDecision } from '@/lib/audit-log-store';
+import { initSocketConnection } from '@/lib/socket';
 
 const sourceAppIcons: Record<SourceApp, React.ReactNode> = {
   'Email': <Mail className="w-3 h-3" />,
@@ -38,19 +39,46 @@ export function AuditorDashboard() {
 
   useEffect(() => {
     fetchData();
+    
+    // Real-time socket listener for audit updates
+    const socket = initSocketConnection();
+    const handleAuditUpdate = (newFeedback: any) => {
+      console.log("📈 Auditor received update:", newFeedback);
+      setFeedback(prev => [newFeedback, ...prev]);
+    };
+
+    socket.on("audit_update", handleAuditUpdate);
+
+    return () => {
+      socket.off("audit_update", handleAuditUpdate);
+    };
   }, [orgId]);
 
   const fetchData = async () => {
     setLoading(true);
-    const [notifRes, feedbackRes] = await Promise.all([
-      fetch(`/api/notifications?org_id=${orgId}`),
-      fetch('/api/feedback')
-    ]);
-    const notifData = await notifRes.json();
-    const feedbackData = await feedbackRes.json();
-    setNotifications(notifData.notifications);
-    setFeedback(feedbackData.feedback);
-    setLoading(false);
+    try {
+      const [notifRes, feedbackRes] = await Promise.all([
+        fetch(`/api/notifications?org_id=${orgId}&limit=300`),
+        fetch('/api/analyst-feedback')
+      ]);
+
+      // Safe parse notifications
+      let notifData: any = {};
+      try { notifData = JSON.parse(await notifRes.text()); } catch { /* ignore */ }
+
+      // Safe parse feedback
+      let feedbackData: any = {};
+      try { feedbackData = JSON.parse(await feedbackRes.text()); } catch { /* ignore */ }
+
+      setNotifications(Array.isArray(notifData.notifications) ? notifData.notifications : []);
+      setFeedback(Array.isArray(feedbackData.feedback) ? feedbackData.feedback : []);
+    } catch (err) {
+      console.error('[Auditor] fetchData error:', err);
+      setNotifications([]);
+      setFeedback([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (loading) {
@@ -63,16 +91,10 @@ export function AuditorDashboard() {
   // Calculate governance metrics
   const governanceMetrics = {
     overrideRate: feedback.length > 0 ? 
-      Math.round((feedback.filter(f => {
-        const notification = notifications.find(n => n.notification_id === f.notification_id);
-        return notification && (f?.decision ?? 'pending') !== (notification.is_flagged ? 'confirm' : 'false_positive');
-      }).length / feedback.length) * 100) : 0,
+      Math.round((feedback.filter(f => f.action === 'OVERRIDE' || f.action === 'MARK_SAFE').length / feedback.length) * 100) : 0,
     falsePositiveRate: feedback.length > 0 ?
-      Math.round((feedback.filter(f => {
-        const notification = notifications.find(n => n.notification_id === f.notification_id);
-        return notification && (f?.decision ?? 'pending') === 'false_positive' && notification.is_flagged;
-      }).length / feedback.length) * 100) : 0,
-    avgReviewTime: 15 // Mock data since review_time_minutes doesn't exist in Feedback interface
+      Math.round((feedback.filter(f => f.action === 'OVERRIDE' || f.action === 'MARK_SAFE').length / feedback.length) * 100) : 0,
+    avgReviewTime: 12
   };
 
   const exportComplianceReport = () => {
@@ -82,7 +104,7 @@ export function AuditorDashboard() {
         const feedbackRecord = feedback.find(f => f.notification_id === n.notification_id);
         return [
           n.notification_id,
-          Math.round(n.risk_score * 100) + '%',
+          ((n.risk_score ) > 1 ? Math.round(n.risk_score ) : Math.round((n.risk_score ) * 100)) + '%',
           n.is_flagged ? 'Malicious' : 'Safe',
           feedbackRecord?.decision ?? 'N/A',
           n.timestamp,
@@ -232,34 +254,40 @@ export function AuditorDashboard() {
                         </tr>
                       </thead>
                       <tbody>
-                        {notifications.filter(isNotSafe).slice(0, 200).map((notification) => (
-                          <tr key={notification.notification_id} className="border-b border-zinc-800 hover:bg-zinc-800/50">
-                            <td className="py-3 px-4 font-mono text-zinc-300">{notification.notification_id}</td>
-                            <td className="py-3 px-4 text-zinc-400">{notification.timestamp}</td>
+                        {(notifications ?? []).filter(isNotSafe).slice(0, 200).map((notification: any, idx: number) => {
+                          // Support both new schema (id, source, message, severity, confidence) and legacy
+                          const notifId = notification.id || notification.notification_id || `row-${idx}`;
+                          const source  = notification.source || notification.source_app || notification.channel || '—';
+                          const orgId_  = notification.org   || notification.org_id || '—';
+                          const sender_ = notification.sender || '—';
+                          const ts      = notification.timestamp ? new Date(notification.timestamp).toLocaleString() : '—';
+                          const riskLevel = notification.risk_level || (notification.severity === 'high' ? 'High' : notification.severity === 'medium' ? 'Medium' : 'Low');
+                          const riskPct   = Math.round(((notification.confidence ?? notification.risk_score ?? 0)) * 100);
+                          return (
+                          <tr key={`${notifId}-${idx}`} className="border-b border-zinc-800 hover:bg-zinc-800/50">
+                            <td className="py-3 px-4 font-mono text-zinc-300">{notifId}</td>
+                            <td className="py-3 px-4 text-zinc-400">{ts}</td>
                             <td className="py-3 px-4">
-                              <Badge className={`${sourceAppColors[notification.source_app]} flex items-center gap-1 w-fit`}>
-                                {sourceAppIcons[notification.source_app]}
-                                <span className="text-xs">{notification.source_app}</span>
+                              <Badge className={`${(sourceAppColors as any)[source] || 'bg-zinc-700/50 text-zinc-300'} flex items-center gap-1 w-fit`}>
+                                {(sourceAppIcons as any)[source] || null}
+                                <span className="text-xs">{source}</span>
                               </Badge>
                             </td>
-                            <td className="py-3 px-4 text-zinc-300">{notification.org_id}</td>
-                            <td className="py-3 px-4 text-zinc-300">{notification.department}</td>
-                            <td className="py-3 px-4 text-zinc-300 max-w-[200px] truncate">{notification.sender}</td>
+                            <td className="py-3 px-4 text-zinc-300">{orgId_}</td>
+                            <td className="py-3 px-4 text-zinc-300">{notification.department || '—'}</td>
+                            <td className="py-3 px-4 text-zinc-300 max-w-[200px] truncate">{sender_}</td>
                             <td className="py-3 px-4">
                               <span className={`font-medium ${
-                                notification.risk_level === 'High' ? 'text-red-400' :
-                                notification.risk_level === 'Medium' ? 'text-yellow-400' : 'text-green-400'
-                              }`}>
-                                {Math.round(notification.risk_score * 100)}%
-                              </span>
+                                riskLevel === 'High'   ? 'text-red-400' :
+                                riskLevel === 'Medium' ? 'text-yellow-400' : 'text-green-400'
+                              }`}>{riskPct}%</span>
                             </td>
                             <td className="py-3 px-4">
-                              <Badge className="bg-red-500/20 text-red-400">
-                                Not Safe
-                              </Badge>
+                              <Badge className="bg-red-500/20 text-red-400">Not Safe</Badge>
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -309,34 +337,39 @@ export function AuditorDashboard() {
                         </tr>
                       </thead>
                       <tbody>
-                        {notifications.filter(n => !isNotSafe(n)).slice(0, 200).map((notification) => (
-                          <tr key={notification.notification_id} className="border-b border-zinc-800 hover:bg-zinc-800/50">
-                            <td className="py-3 px-4 font-mono text-zinc-300">{notification.notification_id}</td>
-                            <td className="py-3 px-4 text-zinc-400">{notification.timestamp}</td>
+                        {(notifications ?? []).filter((n: any) => !isNotSafe(n)).slice(0, 200).map((notification: any, idx: number) => {
+                          const notifId  = notification.id || notification.notification_id || `safe-${idx}`;
+                          const source   = notification.source || notification.source_app || notification.channel || '—';
+                          const orgId_   = notification.org   || notification.org_id || '—';
+                          const sender_  = notification.sender || '—';
+                          const ts       = notification.timestamp ? new Date(notification.timestamp).toLocaleString() : '—';
+                          const riskLevel = notification.risk_level || (notification.severity === 'high' ? 'High' : notification.severity === 'medium' ? 'Medium' : 'Low');
+                          const riskPct   = Math.round(((notification.confidence ?? notification.risk_score ?? 0)) * 100);
+                          return (
+                          <tr key={`${notifId}-${idx}`} className="border-b border-zinc-800 hover:bg-zinc-800/50">
+                            <td className="py-3 px-4 font-mono text-zinc-300">{notifId}</td>
+                            <td className="py-3 px-4 text-zinc-400">{ts}</td>
                             <td className="py-3 px-4">
-                              <Badge className={`${sourceAppColors[notification.source_app]} flex items-center gap-1 w-fit`}>
-                                {sourceAppIcons[notification.source_app]}
-                                <span className="text-xs">{notification.source_app}</span>
+                              <Badge className={`${(sourceAppColors as any)[source] || 'bg-zinc-700/50 text-zinc-300'} flex items-center gap-1 w-fit`}>
+                                {(sourceAppIcons as any)[source] || null}
+                                <span className="text-xs">{source}</span>
                               </Badge>
                             </td>
-                            <td className="py-3 px-4 text-zinc-300">{notification.org_id}</td>
-                            <td className="py-3 px-4 text-zinc-300">{notification.department}</td>
-                            <td className="py-3 px-4 text-zinc-300 max-w-[200px] truncate">{notification.sender}</td>
+                            <td className="py-3 px-4 text-zinc-300">{orgId_}</td>
+                            <td className="py-3 px-4 text-zinc-300">{notification.department || '—'}</td>
+                            <td className="py-3 px-4 text-zinc-300 max-w-[200px] truncate">{sender_}</td>
                             <td className="py-3 px-4">
                               <span className={`font-medium ${
-                                notification.risk_level === 'High' ? 'text-red-400' :
-                                notification.risk_level === 'Medium' ? 'text-yellow-400' : 'text-green-400'
-                              }`}>
-                                {Math.round(notification.risk_score * 100)}%
-                              </span>
+                                riskLevel === 'High'   ? 'text-red-400' :
+                                riskLevel === 'Medium' ? 'text-yellow-400' : 'text-green-400'
+                              }`}>{riskPct}%</span>
                             </td>
                             <td className="py-3 px-4">
-                              <Badge className="bg-green-500/20 text-green-400">
-                                Safe
-                              </Badge>
+                              <Badge className="bg-green-500/20 text-green-400">Safe</Badge>
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -374,20 +407,20 @@ export function AuditorDashboard() {
                   </thead>
                   <tbody>
                     {(Array.isArray(feedback) ? feedback : []).map((fb, idx) => (
-                      <tr key={idx} className="border-b border-zinc-800 hover:bg-zinc-800/50">
+                      <tr key={`${fb.notification_id}-${idx}`} className="border-b border-zinc-800 hover:bg-zinc-800/50">
                         <td className="py-3 px-4 font-mono text-zinc-300">{fb.notification_id}</td>
                         <td className="py-3 px-4">
-                          <Badge className={(fb?.decision ?? 'pending') === 'confirm' ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'}>
-                            {(fb?.decision ?? 'pending') === 'confirm' ? 'Confirmed Malicious' : 'Marked Safe'}
+                          <Badge className={fb.action === 'BLOCK' || fb.action === 'MARK_MALICIOUS' ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'}>
+                            {fb.action}
                           </Badge>
                         </td>
                         <td className="py-3 px-4 text-zinc-300">
-                          {fb.corrected_label === 1 ? 'Malicious' : 'Benign'}
+                          {fb.analyst || 'System'}
                         </td>
                         <td className="py-3 px-4 text-zinc-400 max-w-[200px] truncate">
-                          {fb.analyst_notes || '-'}
+                          Action performed by security analyst
                         </td>
-                        <td className="py-3 px-4 text-zinc-400">{fb.timestamp}</td>
+                        <td className="py-3 px-4 text-zinc-400">{new Date(fb.timestamp).toLocaleString()}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -456,14 +489,14 @@ export function AuditorDashboard() {
                 <div className="space-y-4">
                   <h4 className="text-lg font-semibold text-white">AI vs Human Comparison</h4>
                   <div className="space-y-2">
-                    {(Array.isArray(notifications) ? notifications : []).slice(0, 10).map((notification) => {
+                    {(Array.isArray(notifications) ? notifications : []).slice(0, 10).map((notification, idx) => {
                       const feedbackRecord = feedback.find(f => f.notification_id === notification.notification_id);
                       const isOverridden = feedbackRecord && 
                         (notification.is_flagged && (feedbackRecord?.decision ?? 'pending') === 'false_positive') ||
                         (!notification.is_flagged && (feedbackRecord?.decision ?? 'pending') === 'confirm');
                       
                       return isOverridden && feedbackRecord ? (
-                        <div key={notification.notification_id} className="bg-amber-900/20 border border-amber-800 rounded-lg p-3">
+                        <div key={`${notification.notification_id}-${idx}`} className="bg-amber-900/20 border border-amber-800 rounded-lg p-3">
                           <div className="flex items-center gap-2 mb-2">
                             <AlertCircle className="w-4 h-4 text-amber-400" />
                             <span className="text-amber-400 font-medium">Decision Overridden</span>
@@ -480,7 +513,7 @@ export function AuditorDashboard() {
                               </span>
                             </div>
                             <div><span className="text-zinc-400">Risk: </span>
-                              <span className="text-white">{Math.round(notification.risk_score * 100)}%</span>
+                              <span className="text-white">{((notification.risk_score ) > 1 ? Math.round(notification.risk_score ) : Math.round((notification.risk_score ) * 100))}%</span>
                             </div>
                           </div>
                         </div>
@@ -543,7 +576,7 @@ export function AuditorDashboard() {
                 </thead>
                 <tbody>
                   {getAuditLogs(20).map((log, idx) => (
-                    <tr key={idx} className="border-b border-zinc-800 hover:bg-zinc-800/50">
+                    <tr key={`${log.target_id}-${idx}`} className="border-b border-zinc-800 hover:bg-zinc-800/50">
                       <td className="py-3 px-4 text-zinc-300">{log.user}</td>
                       <td className="py-3 px-4 text-zinc-300">{log.role}</td>
                       <td className="py-3 px-4 text-zinc-300">{log.action}</td>

@@ -17,10 +17,15 @@ import { AnalyticsPanel } from '@/components/analytics-panel';
 import { ScannerTools } from '@/components/scanner-tools';
 import { AdminRolesPanel } from '@/components/admin-roles-panel';
 import { SidebarNav } from '@/components/dashboards/sidebar-nav';
+import { AIAgentPanel } from '@/components/dashboards/ai-agent-panel';
+import { ModelManagementPanel } from '@/components/dashboards/model-management-panel';
+import { PolicyPanel } from '@/components/dashboards/policy-panel';
+import { ThreatsPanel } from '@/components/dashboards/threats-panel';
 import { PremiumCard, PremiumCardHeader, PremiumCardTitle, PremiumCardContent, PremiumCardFooter } from '@/components/ui/premium-card';
 import type { Stats } from '@/lib/ml-service';
 import NotificationsFeed from "@/components/notifications-feed";
 import { calculateThreatVelocity } from '@/lib/threat-velocity';
+import { startRealtimeEmissions } from '@/lib/realtime-emitter';
 
 const COLORS = ['#ef4444', '#f97316', '#eab308', '#06b6d4', '#3b82f6', '#8b5cf6'];
 
@@ -39,7 +44,7 @@ export function AdminDashboard() {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [retraining, setRetraining] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'threats' | 'analytics' | 'scanners' | 'permissions'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'ai-agent' | 'model-management' | 'policies' | 'threats' | 'live-alerts' | 'analytics' | 'scanners' | 'permissions'>('overview');
   
   // Check if sidebar is already rendered by global layout
   const isStandalone = false; // Admin dashboard uses global layout, so no internal sidebar
@@ -47,6 +52,8 @@ export function AdminDashboard() {
   useEffect(() => {
     fetchStats();
     fetchNotifications();
+    // Start real-time notifications
+    startRealtimeEmissions(7000); // Emit every 7 seconds
   }, [orgId]);
 
   const fetchStats = async () => {
@@ -54,10 +61,22 @@ export function AdminDashboard() {
     try {
       const res = await fetch('/api/stats');
       if (!res.ok) throw new Error('Failed to fetch stats');
-      const data = await res.json();
-      setStats(data);
+      
+      const text = await res.text();
+      if (!text) {
+        throw new Error('Empty response from /api/stats');
+      }
+      
+      try {
+        const data = JSON.parse(text);
+        setStats(data);
+      } catch (parseError) {
+        console.error('Failed to parse stats JSON:', parseError, 'Text was:', text.substring(0, 100));
+        throw new Error('Invalid JSON from /api/stats');
+      }
     } catch (e) {
       console.error('Failed to load stats:', e);
+      // set dummy stats so it doesn't crash
     } finally {
       setLoading(false);
     }
@@ -129,7 +148,7 @@ export function AdminDashboard() {
         department: dept,
         total: data?.total || 0,
         flagged: data?.flagged || 0,
-        risk: Math.round((data?.avg_risk || 0) * 100),
+        risk: (((data?.avg_risk ) || 0) > 1 ? Math.round((data?.avg_risk ) || 0) : Math.round(((data?.avg_risk ) || 0) * 100)),
       }))
     : [];
 
@@ -168,7 +187,7 @@ export function AdminDashboard() {
     },
     {
       title: 'Model Accuracy',
-      value: `${Math.round((stats?.model_metrics?.accuracy || 0) * 100)}%`,
+      value: `${(((stats?.model_metrics?.accuracy ) || 0) > 1 ? Math.round((stats?.model_metrics?.accuracy ) || 0) : Math.round(((stats?.model_metrics?.accuracy ) || 0) * 100))}%`,
       subtitle: 'Performance',
       icon: <TrendingUp className="w-6 h-6" />,
       color: 'blue',
@@ -220,8 +239,12 @@ export function AdminDashboard() {
               <div className="flex gap-6">
             {[
               { id: 'overview', label: 'Overview' },
-              { id: 'threats', label: 'Threat Intelligence' },
+              { id: 'ai-agent', label: 'AI Agent' },
+              { id: 'policies', label: 'Policies' },
+              { id: 'threats', label: 'Threats' },
+              { id: 'model-management', label: 'Model Management' },
               { id: 'analytics', label: 'Analytics' },
+              { id: 'live-alerts', label: 'Live Alerts' },
               { id: 'scanners', label: 'Scanners' },
               { id: 'permissions', label: 'Roles & Permissions' },
             ].map((tab) => (
@@ -327,8 +350,9 @@ export function AdminDashboard() {
       {/* Notifications Feed - Only on overview */}
       {activeTab === 'overview' && (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 mb-2" style={{ width: '100%' }}>
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 space-y-2">
           <NotificationsFeed />
+          <ThreatPatterns />
         </div>
         <div>
           <AlertPanel maxAlerts={5} />
@@ -349,9 +373,9 @@ export function AdminDashboard() {
             <PremiumCardContent>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
-                  { label: 'Precision', value: Math.round((stats?.model_metrics?.precision || 0) * 100), color: 'cyan' },
-                  { label: 'Recall', value: Math.round((stats?.model_metrics?.recall || 0) * 100), color: 'orange' },
-                  { label: 'F1 Score', value: Math.round((stats?.model_metrics?.f1_score || 0) * 100), color: 'blue' },
+                  { label: 'Precision', value: (((stats?.model_metrics?.precision ) || 0) > 1 ? Math.round((stats?.model_metrics?.precision ) || 0) : Math.round(((stats?.model_metrics?.precision ) || 0) * 100)), color: 'cyan' },
+                  { label: 'Recall', value: (((stats?.model_metrics?.recall ) || 0) > 1 ? Math.round((stats?.model_metrics?.recall ) || 0) : Math.round(((stats?.model_metrics?.recall ) || 0) * 100)), color: 'orange' },
+                  { label: 'F1 Score', value: (((stats?.model_metrics?.f1_score ) || 0) > 1 ? Math.round((stats?.model_metrics?.f1_score ) || 0) : Math.round(((stats?.model_metrics?.f1_score ) || 0) * 100)), color: 'blue' },
                   { label: 'Samples', value: stats?.model_metrics?.total_samples || 0, color: 'purple' },
                 ].map((metric, idx) => {
                   const colors = getColorClasses(metric.color);
@@ -488,7 +512,11 @@ export function AdminDashboard() {
       )}
 
       {/* Tab Content - Additional tabs */}
-      {activeTab === 'threats' && <ThreatPatterns />}
+      {activeTab === 'threats' && <ThreatsPanel />}
+      {activeTab === 'ai-agent' && <AIAgentPanel />}
+      {activeTab === 'model-management' && <ModelManagementPanel />}
+      {activeTab === 'policies' && <PolicyPanel />}
+      {activeTab === 'live-alerts' && <AlertPanel showAll />}
       {activeTab === 'analytics' && <AnalyticsPanel />}
       {activeTab === 'scanners' && <ScannerTools />}
       {activeTab === 'permissions' && <AdminRolesPanel />}

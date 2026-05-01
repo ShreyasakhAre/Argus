@@ -24,14 +24,29 @@ export interface Notification {
   notification_id: string;
   org_id: string;
   department: string;
+  channel: string; // From CSV: Teams, Slack, ERP, HR Portal, Email
   sender: string;
   receiver: string;
+  sender_domain: string;
   content: string;
+  contains_url: number; // 0 or 1
+  url: string;
+  attachment_type: string;
+  priority: string;
+  threat_category: string; // Safe, Low Risk Suspicious, BEC, Ransomware, etc.
+  risk_score: number; // 0-1 scale
   timestamp: string;
-  risk_score: number;
+  country: string;
+  device_type: string;
+  is_malicious: number; // 0 or 1
+  review_status: string; // Approved, Pending
+  analyst_feedback: string;
+  
+  // Derived fields for compatibility
   risk_level: 'Low' | 'Medium' | 'High';
   is_flagged: boolean;
-  source_app: SourceApp;
+  source_app: SourceApp; // Mapped from channel
+  read?: boolean;
 }
 
 export interface Stats {
