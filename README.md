@@ -1,250 +1,305 @@
-# 🛡️ ARGUS  
-## Real-Time AI-Driven Threat Intelligence & Notification Governance Platform
+## ARGUS
 
-ARGUS is a full-stack, enterprise-grade security platform designed to strengthen internal enterprise communication systems.
+## AI-Powered Real-Time Threat Intelligence & Notification Governance Platform
 
-It proactively:
-- Identifies suspicious URLs  
-- Analyzes domain reputation  
-- Calculates threat velocity  
-- Applies AI-based risk scoring  
-- Enforces strict role-based governance  
+> **Not just detecting threats — enabling real-time security decisions at scale.**
 
-This project simulates a real-world enterprise security architecture built for scalability, explainability, and governance compliance.
+ARGUS is a full-stack, enterprise-grade system designed to **ingest, analyze, and act on high-volume security notifications** across platforms like Email, Slack, ERP, and HR systems.
+
+It combines **Machine Learning + AI Agent reasoning + Real-Time Streaming + RBAC** to simulate a **production-ready security intelligence platform**.
 
 ---
 
-# 📌 Executive Summary
+## 🚀 Live Capabilities
 
-ARGUS Enterprise is a production-ready, real-time AI-powered security intelligence platform built to monitor, classify, and govern enterprise communications across internal systems such as Email, Slack, Teams, Finance, and HR portals.
-
-### The system enables organizations to:
-
-- Detect phishing, BEC, ransomware, and fraud attempts in real-time  
-- Reduce false positives through human-in-the-loop workflows  
-- Enforce governance and audit compliance  
-- Maintain role-based access control and accountability  
-- Scale to high-volume enterprise environments  
-
-ARGUS bridges the gap between automated AI detection and enterprise governance control systems.
+* ⚡ Processes **10,000+ notifications** in real-time
+* 🧠 AI-powered **risk scoring + explainable decisions**
+* 🔄 **Live alert streaming (WebSockets)**
+* 🔐 **Role-Based Access Control (RBAC)**
+* 🤖 AI Agent with **Passive / Assisted / Autonomous modes**
+* 📊 Real-time analytics dashboards
+* 🧾 Audit logs & governance tracking
 
 ---
 
-# 🎯 Enterprise Objectives
+## 🏗️ System Architecture & Request Flow
 
-ARGUS addresses critical enterprise security challenges:
+<p align="left">
+  <b>System Architecture</b><br><br>
+  <img src="https://github.com/user-attachments/assets/1bb16083-7875-4313-9a5c-c11b3eaf6960" width="1000" style="border-radius: 8px;"/>
+</p>
 
-| Enterprise Problem | ARGUS Solution |
-|-------------------|---------------|
-| High volume of communications | Scalable real-time streaming architecture |
-| Manual fraud review overhead | AI-driven classification engine |
-| Blind trust in AI | Human validation workflows |
-| Lack of audit transparency | Decision logging & auditor dashboards |
-| Multi-role access complexity | Strict RBAC enforcement |
-| Governance compliance gaps | Traceable actions & overrides |
+<br>
 
----
+<p align="left">
+  <b>Database Schema</b><br><br>
+  <img src="https://github.com/user-attachments/assets/ee971961-e980-4549-ac02-885411457c1d" width="1200" style="border-radius: 8px;"/>
+</p>
 
-# 🏗 Enterprise Architecture
+<br>
 
-## System Flow
-
-Frontend (Next.js + React + TypeScript)  
-⬇  
-API Layer (Next.js API Routes / Node)  
-⬇  
-ML Inference Engine (FastAPI + Scikit-learn)  
-⬇  
-Real-Time Streaming (WebSockets)  
-⬇  
-Dataset Layer (5,000+ Notifications Simulation)
-
-### Architectural Highlights
-
-- Modular role-based routing  
-- Real-time WebSocket propagation  
-- Explainable ML inference layer  
-- Governance-aware decision logging  
-- Scalable notification simulation  
+<p align="left">
+  <i>End-to-end system showing frontend → API → AI Agent → ML pipeline → real-time streaming</i>
+</p>
 
 ---
 
-# ⚙️ Technology Stack
+## 🧠 AI Agent 
 
-## Frontend
-- Next.js (App Router)
-- React
-- TypeScript
-- Tailwind CSS
-- WebSocket Client
+### 🤖 What it does
 
-## Backend
-- Node.js
-- Next.js API Routes
-- Role-based middleware architecture
+The AI Agent acts as the **decision intelligence layer** — going beyond ML predictions to generate **context-aware, explainable actions**.
 
-## Machine Learning
-- Python
-- FastAPI
-- Scikit-learn
-- Feature engineering pipeline
-- Explainable risk scoring model
+Instead of:
 
-## Data Layer
-- CSV-based scalable dataset
-- 5,000+ notification simulation
-- Real-time streaming integration
-- Optimized in-memory filtering
+> “This is risky”
+
+It answers:
+
+> “Why is this risky, and what should be done?”
 
 ---
 
-# 🔐 Enterprise Security Features
+### ⚙️ How it works
 
-## 1️⃣ Role-Based Access Control (RBAC)
-
-Strict separation of responsibilities:
-
-| Role | Capabilities |
-|------|-------------|
-| Admin | System-wide governance, bulk blocking, analytics |
-| Fraud Analyst | Threat review, AI override, validation |
-| Department Head | Department risk analytics |
-| Auditor | Governance audit & decision traceability |
-| Employee | Personal notification visibility |
-
-Role routing is securely locked to prevent privilege escalation.
+1. Incoming notification (Email / Slack / ERP)
+2. Entity extraction (URL, domain, keywords)
+3. Dynamic tool selection (ReAct-style reasoning)
+4. ML inference (risk scoring)
+5. Feature-level analysis
+6. Action recommendation generated
 
 ---
 
-## 2️⃣ Real-Time Threat Streaming
+### 🔧 Agent Tools
 
-- WebSocket-based live delivery  
-- Sub-second notification rendering  
-- No polling overhead  
-- Cross-dashboard propagation  
-- Optimized for high-volume environments  
-
----
-
-## 3️⃣ AI Risk Classification Engine
-
-Each notification includes:
-
-- Risk score (0–1 scale)
-- Risk severity (Safe / Not Safe)
-- Confidence score
-- Contributing feature explanations
-- URL scan analysis
-
-### ML Strategy
-
-- URL entropy detection  
-- Suspicious keyword analysis  
-- Sender domain validation  
-- Risk distribution modeling  
-- Human feedback calibration  
+* URL entropy analyzer
+* Domain reputation checker
+* Phishing keyword detector
+* Historical pattern analyzer
+* Threat intelligence lookup
 
 ---
 
-## 4️⃣ Human-in-the-Loop Governance
+### 🔄 Modes
 
-ARGUS enforces AI-assisted decision making, not blind automation.
-
-- Analysts validate high-risk alerts  
-- Overrides are logged  
-- Decisions are traceable  
-- Audit visibility is preserved  
-- Governance trail maintained  
+| Mode       | Behavior                |
+| ---------- | ----------------------- |
+| Passive    | Only insights           |
+| Assisted   | Suggestions to analysts |
+| Autonomous | Executes actions        |
 
 ---
 
-## 5️⃣ Safe vs Not-Safe Segregation
+### 🔗 Integration
 
-- Automatic AI segregation  
-- Bulk selection for high-risk alerts  
-- Block sender / mute domain actions  
-- Severity prioritization  
-- Cross-dashboard consistency  
-
----
-
-## 6️⃣ Audit & Compliance Readiness
-
-The Auditor Dashboard provides:
-
-- Decision history visibility  
-- Analyst override tracking  
-- Timeline-based event tracing  
-- Governance compliance review  
-
-Designed to support:
-- SOC monitoring  
-- Internal fraud compliance  
-- Enterprise audit requirements  
+```text
+Frontend → API Layer → AI Agent (FastAPI)
+                         ↓
+                 ML + Tools + Reasoning
+                         ↓
+                Response → UI + Alerts
+```
 
 ---
 
-# 📊 Scalability & Performance Engineering
+## ⚙️ Tech Stack
 
-- Tested with 5,000+ notifications  
-- Capped rendering for performance  
-- Optimized dropdown scroll handling  
-- Controlled re-renders for WebSocket updates  
-- Efficient in-memory filtering  
-- Stable architecture under load  
+### Frontend
 
----
+* Next.js (App Router)
+* React + TypeScript
+* Tailwind CSS
+* Recharts
+* WebSockets
 
-# 🧠 Explainable AI Design
+### Backend
 
-ARGUS does not operate as a black box.
+* Node.js
+* Express / Next API Routes
+* JWT Authentication
+* RBAC Middleware
 
-Each flagged alert includes:
-- Feature impact breakdown  
-- Risk reasoning explanation  
-- Confidence metrics  
-- Link analysis  
+### Machine Learning
 
-This improves:
-- Analyst trust  
-- Executive visibility  
-- Regulatory transparency  
-- Decision accountability  
+* Python + FastAPI
+* Scikit-learn
+* TF-IDF + Logistic Regression + XGBoost
+* Explainable risk scoring
 
----
+### Data Layer
 
-# 👤 Enterprise Account Management
-
-- Profile sections per role  
-- Secure password reset via email link  
-- Role-based identity segregation  
-- Governance-aligned access control  
+* 10,000+ notification dataset
+* Real-time streaming simulation
+* Optimized in-memory filtering
 
 ---
 
-# 🚀 Deployment
+## 🔌 API Endpoints
 
-## Backend (Render)
+### 🔐 Auth
 
-- **Root directory:** `backend`
-- **Build command:** `npm install --legacy-peer-deps`
-- **Start command:** `node server.js`
-- **Environment variables:**
-  - `MONGO_URI` — MongoDB connection string
-  - `JWT_SECRET` — JWT signing secret
-  - `FRONTEND_URL` — Deployed frontend URL (e.g. `https://your-app.vercel.app`)
+* `POST /api/auth/login`
+* `POST /api/auth/register`
+* `POST /api/auth/reset-password`
 
-## Frontend (Vercel)
+### 📊 Notifications
 
-- **Root directory:** project root
-- **Build command:** `npm run build`
-- **Environment variables:**
-  - `NEXT_PUBLIC_BACKEND_URL` — Deployed backend URL (e.g. `https://your-backend.onrender.com`)
+* `GET /api/notifications`
+* `GET /api/notifications/stream` (WebSocket)
+* `GET /api/notifications/:id`
+* `POST /api/notifications/action`
+
+### 🤖 AI Agent
+
+* `POST /api/agent/analyze`
+* `POST /api/agent/query`
+
+### 📈 Analytics
+
+* `GET /api/analytics/overview`
+* `GET /api/analytics/performance`
+
+### 👥 Users & Audit
+
+* `GET /api/users`
+* `PUT /api/users/:id/role`
+* `GET /api/audit/logs`
 
 ---
 
-## Development
+## 🔄 Request Flow (Sequence)
+
+```text
+User Action (Dashboard)
+        ↓
+Frontend (React UI)
+        ↓
+API Layer (Node.js)
+        ↓
+AI Agent (FastAPI)
+        ↓
+Feature Extraction + Tool Calls
+        ↓
+ML Model Inference
+        ↓
+Risk Score + Explanation
+        ↓
+Response to UI
+        ↓
+WebSocket Broadcast (Live Alerts)
+```
+
+---
+
+## 🔐 Core Features
+
+### 🧠 AI Risk Engine
+
+* Risk score (0–1)
+* Severity classification
+* Confidence score
+* Explainable reasoning
+
+---
+
+### ⚡ Real-Time Streaming
+
+* WebSockets (no polling)
+* Sub-second updates
+* Cross-dashboard sync
+
+---
+
+### 🔐 RBAC System
+
+| Role     | Access              |
+| -------- | ------------------- |
+| Admin    | Full system control |
+| Analyst  | Threat validation   |
+| Auditor  | Logs & compliance   |
+| Employee | Personal alerts     |
+
+---
+
+### 🛡️ Policy Engine
+
+* Rule-based enforcement
+* Automated violation tracking
+* Governance workflows
+
+---
+
+### 🔍 Threat Scanner
+
+* URL entropy
+* HTTPS validation
+* Domain checks
+* Phishing detection
+
+---
+
+## 📊 Performance & Scalability
+
+* Handles **10,000+ events**
+* Optimized rendering + state updates
+* Efficient WebSocket streaming
+* Low-latency alert propagation
+
+---
+
+## 🧠 Design Principles
+
+* **Event-driven architecture** (real-time systems)
+* **Separation of concerns** (modular layers)
+* **AI + Rules hybrid system**
+* **Human-in-the-loop validation**
+* **Explainability-first ML design**
+
+---
+
+## 💡 Key Learnings
+
+* ML ≠ real-world system (integration is harder)
+* Real-time systems require **latency optimization**
+* Explainability is critical for adoption
+* Combining **AI + rules + UI workflows** is essential
+
+---
+
+## 🚀 Deployment
+
+### Backend (Render)
+
+```bash
+npm install --legacy-peer-deps
+node server.js
+```
+
+### Frontend (Vercel)
+
+```bash
+npm run build
+```
+
+---
+
+## 🧪 Run Locally
 
 ```bash
 npm install
 npm run dev
+```
+---
+
+## 🎥 Full Demo 
+
+▶️ [Watch Demo](https://drive.google.com/file/d/1h2Nr8wK4o9hVK7ym4lUVWF0VxJxho46h/view)
+
+## 🔮 Future Improvements
+
+* Kafka-based streaming architecture
+* Advanced threat intelligence models
+* Fully autonomous AI response system
+* Distributed system scaling
+
