@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 /**
- * Test endpoint to emit fraud alerts via Socket.IO
+ * Test endpoint to emit fraud alerts via the backend Socket.IO server
  * POST /api/notifications/test
  * 
  * Body:
@@ -16,7 +16,6 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { message = 'Test notification', severity = 'medium', title = 'Test Alert' } = body;
 
-    // Emit through Socket.IO to all connected clients
     const payload = {
       type: 'new',
       notification: {
@@ -28,7 +27,22 @@ export async function POST(request: NextRequest) {
       },
     };
 
-    console.log('📤 Emitting test alert (Simulation Mode):', payload);
+    console.log('📤 Sending test alert to backend:', payload);
+
+    const backendRes = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/alerts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!backendRes.ok) {
+      const text = await backendRes.text();
+      console.error('Backend returned an error:', backendRes.status, text);
+      return NextResponse.json(
+        { error: 'Backend failed to process alert', details: text },
+        { status: backendRes.status }
+      );
+    }
 
     return NextResponse.json(
       { success: true, message: 'Alert emitted', payload },

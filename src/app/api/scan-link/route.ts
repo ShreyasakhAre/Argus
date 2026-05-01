@@ -57,6 +57,7 @@ export async function POST(request: NextRequest) {
     );
 
     // Add notification to store
+    const baseUrl = new URL(request.url).origin;
     const notificationResponse = await fetch(
       `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/notifications/manage`,
       {
