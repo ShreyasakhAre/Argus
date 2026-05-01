@@ -11,46 +11,73 @@ interface ToastNotification {
   timestamp: Date;
 }
 
+/** Format a relative time string from a Date */
+function formatRelativeTime(date: Date): string {
+  const diffMs = Date.now() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return 'just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  return date.toLocaleTimeString();
+}
+
 export function GlobalNotificationToast() {
   const [toasts, setToasts] = useState<ToastNotification[]>([]);
 
   useEffect(() => {
-    // Listen to existing socket events or custom events
     const handleNewNotification = (event: CustomEvent) => {
-      const notification = event.detail;
-      
-      if (!notification) return;
+      const detail = event.detail;
+      if (!detail) return;
+
+      // Support both direct alert objects and wrapped {notification, severity} format
+      const alert = detail.notification || detail;
+      if (!alert) return;
+
+      // Resolve fields from new schema (message, source, severity, confidence)
+      // or fallback to old schema (content, source_app, risk_level)
+      const rawMessage = alert.message || alert.content || '';
+      const rawSource  = alert.source  || alert.source_app  || alert.channel || '';
+      const rawSeverity = (alert.severity || detail.severity || '').toLowerCase();
+      const riskLevel   = alert.risk_level || '';
+
+      // Skip completely empty alerts
+      if (!rawMessage && !rawSource) return;
+
+      // Derive toast type
+      const toastType: ToastNotification['type'] =
+        rawSeverity === 'high' || rawSeverity === 'critical' || riskLevel === 'High' ? 'high' :
+        rawSeverity === 'medium' || riskLevel === 'Medium' ? 'medium' :
+        rawSeverity === 'low' ? 'low' : 'safe';
+
+      // Build clean title: use source as badge title
+      const title = rawSource
+        ? `${rawSource} Alert`
+        : toastType === 'high' ? '🔴 High-Risk Alert'
+        : toastType === 'medium' ? '🟡 Medium-Risk Alert'
+        : '🟢 Activity Detected';
+
+      // Build description from real message
+      const description = rawMessage.length > 0
+        ? rawMessage.substring(0, 120)
+        : `${rawSeverity} severity activity detected`;
 
       const newToast: ToastNotification = {
         id: Math.random().toString(36).substr(2, 9),
-        type: notification.risk_level === 'High' ? 'high' : 
-              notification.risk_level === 'Medium' ? 'medium' : 
-              notification.is_flagged ? 'low' : 'safe',
-        title: notification.source_app || 'New Notification',
-        message: notification.content?.substring(0, 100) || 'New notification received',
-        timestamp: new Date()
+        type: toastType,
+        title,
+        message: description,
+        timestamp: new Date(),
       };
 
-      setToasts(prev => {
-        const updated = [newToast, ...prev];
-        // Keep only latest 3 toasts
-        return updated.slice(0, 3);
-      });
+      setToasts(prev => [newToast, ...prev].slice(0, 3));
     };
 
-    // Listen to custom notification events
+    // Listen on both event names used across the codebase
+    window.addEventListener('new_alert', handleNewNotification as EventListener);
     window.addEventListener('new-notification', handleNewNotification as EventListener);
-    
-    // Also listen to socket events if available
-    if (typeof window !== 'undefined' && (window as any).socket) {
-      (window as any).socket.on('notification', handleNewNotification);
-    }
 
     return () => {
+      window.removeEventListener('new_alert', handleNewNotification as EventListener);
       window.removeEventListener('new-notification', handleNewNotification as EventListener);
-      if (typeof window !== 'undefined' && (window as any).socket) {
-        (window as any).socket.off('notification', handleNewNotification);
-      }
     };
   }, []);
 
@@ -58,29 +85,22 @@ export function GlobalNotificationToast() {
     setToasts(prev => prev.filter(toast => toast.id !== id));
   };
 
-  // Auto-remove toasts after 5 seconds
+  // Auto-remove oldest toast after 6 seconds
   useEffect(() => {
     if (toasts.length === 0) return;
-
     const timer = setTimeout(() => {
-      setToasts(prev => prev.slice(0, -1)); // Remove oldest toast
-    }, 5000);
-
+      setToasts(prev => prev.slice(0, -1));
+    }, 6000);
     return () => clearTimeout(timer);
   }, [toasts]);
 
   const getToastStyles = (type: ToastNotification['type']) => {
     switch (type) {
-      case 'high':
-        return 'bg-red-600 text-white border-red-700';
-      case 'medium':
-        return 'bg-orange-600 text-white border-orange-700';
-      case 'low':
-        return 'bg-yellow-600 text-white border-yellow-700';
-      case 'safe':
-        return 'bg-green-600 text-white border-green-700';
-      default:
-        return 'bg-slate-600 text-white border-slate-700';
+      case 'high':   return 'bg-red-950/95 border-red-700 text-red-100';
+      case 'medium': return 'bg-orange-950/95 border-orange-700 text-orange-100';
+      case 'low':    return 'bg-yellow-950/95 border-yellow-700 text-yellow-100';
+      case 'safe':   return 'bg-green-950/95 border-green-700 text-green-100';
+      default:       return 'bg-slate-900 border-slate-700 text-slate-100';
     }
   };
 
@@ -88,68 +108,50 @@ export function GlobalNotificationToast() {
     switch (type) {
       case 'high':
       case 'medium':
-      case 'low':
-        return <AlertTriangle className="w-4 h-4" />;
-      case 'safe':
-        return <CheckCircle className="w-4 h-4" />;
-      default:
-        return <Info className="w-4 h-4" />;
+      case 'low':    return <AlertTriangle className="w-4 h-4" />;
+      case 'safe':   return <CheckCircle className="w-4 h-4" />;
+      default:       return <Info className="w-4 h-4" />;
     }
   };
 
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-50 space-y-2" style={{ width: '300px' }}>
+    <div className="fixed top-4 right-4 z-50 space-y-2" style={{ width: '320px' }}>
       {toasts.map((toast) => (
         <div
           key={toast.id}
           className={`
-            relative p-4 rounded-lg shadow-lg border
+            relative p-4 rounded-lg shadow-xl border backdrop-blur-sm
             transform transition-all duration-300 ease-in-out
             ${getToastStyles(toast.type)}
           `}
-          style={{
-            animation: 'slideInRight 0.3s ease-out',
-          }}
+          style={{ animation: 'slideInRight 0.3s ease-out' }}
         >
           <button
             onClick={() => removeToast(toast.id)}
-            className="absolute top-2 right-2 text-white/80 hover:text-white transition-colors"
+            className="absolute top-2 right-2 opacity-70 hover:opacity-100 transition-opacity"
           >
             <X className="w-3 h-3" />
           </button>
-          
-          <div className="flex items-start gap-3">
-            <div className="flex-shrink-0 mt-0.5">
+
+          <div className="flex items-start gap-3 pr-4">
+            <div className="flex-shrink-0 mt-0.5 opacity-90">
               {getToastIcon(toast.type)}
             </div>
-            
             <div className="flex-1 min-w-0">
-              <div className="font-medium text-sm mb-1">
-                {toast.title}
-              </div>
-              <div className="text-xs opacity-90 break-words">
-                {toast.message}
-              </div>
-              <div className="text-xs opacity-75 mt-1">
-                {toast.timestamp.toLocaleTimeString()}
-              </div>
+              <div className="font-semibold text-sm mb-1 truncate">{toast.title}</div>
+              <div className="text-xs opacity-85 break-words line-clamp-2">{toast.message}</div>
+              <div className="text-xs opacity-60 mt-1">{formatRelativeTime(toast.timestamp)}</div>
             </div>
           </div>
         </div>
       ))}
-      
+
       <style jsx>{`
         @keyframes slideInRight {
-          from {
-            transform: translateX(100%);
-            opacity: 0;
-          }
-          to {
-            transform: translateX(0);
-            opacity: 1;
-          }
+          from { transform: translateX(110%); opacity: 0; }
+          to   { transform: translateX(0);    opacity: 1; }
         }
       `}</style>
     </div>

@@ -209,7 +209,7 @@ export function QRScanner() {
                 </div>
                 <Badge className={getRiskBg(result.scan_result.risk_level)}>
                   <Shield className="w-3 h-3 mr-1" />
-                  {result.scan_result.risk_level} Risk ({Math.round(result.scan_result.risk_score * 100)}%)
+                  {result.scan_result.risk_level} Risk ({((result.scan_result.risk_score ) > 1 ? Math.round(result.scan_result.risk_score ) : Math.round((result.scan_result.risk_score ) * 100))}%)
                 </Badge>
               </div>
 

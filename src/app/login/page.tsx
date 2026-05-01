@@ -17,7 +17,7 @@ const roleConfig: Record<Role, { label: string; icon: React.ReactNode; color: st
     color: 'text-red-500',
     description: 'Full system access, ML model management'
   },
-  analyst: { 
+  fraud_analyst: { 
     label: 'Fraud Analyst', 
     icon: <Search className="w-4 h-4" />, 
     color: 'text-blue-500',
@@ -62,7 +62,14 @@ export default function LoginPage() {
     try {
       const success = await login(email, password, role, orgId);
       if (success) {
-        router.push('/');
+        const routes: Record<Role, string> = {
+          admin: '/admin',
+          fraud_analyst: '/fraud-analyst',
+          department_head: '/department-head',
+          employee: '/employee',
+          auditor: '/auditor',
+        };
+        router.push(routes[role]);
       } else {
         setError('Login failed. Please try again.');
       }

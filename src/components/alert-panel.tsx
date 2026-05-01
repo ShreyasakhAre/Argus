@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { io } from 'socket.io-client';
 import { Bell, AlertTriangle, Shield, Zap, CheckCircle, X, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SeverityBadge, SeverityIndicator } from '@/components/ui/severity-badge';
 import { PremiumCard, PremiumCardHeader, PremiumCardTitle, PremiumCardContent } from '@/components/ui/premium-card';
 import type { Alert } from '@/lib/alert-types';
+import { initSocketConnection } from '@/lib/socket';
 
 interface AlertPanelProps {
   maxAlerts?: number;
@@ -108,11 +108,9 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
 
   // Socket.io real-time listener for Express events
   useEffect(() => {
-    // Enforcing strict WebSocket transport as requested via Prod ENV
-    const socket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "https://argus-backend.onrender.com", {
-      transports: ["websocket"],
-    });
+    const socket = initSocketConnection();
     
+    if (socket.connected) setSocketStatus("Connected");
     socket.on("connect", () => {
       console.log("✅ SOCKET CONNECTED:", socket.id);
       setSocketStatus("Connected");
@@ -128,15 +126,21 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
       setSocketStatus("Disconnected");
     });
     
-    socket.on("new_alert", (eventData) => {
+    const handleAlert = (eventData: any) => {
       console.log("🚨 LIVE ALERT RECEIVED:", eventData);
       
       if (eventData) {
-        setLiveAlerts(prev => {
-          // Idempotency check to avoid duplicate injections
-          if (prev.some(a => (a.id && a.id === eventData.id) || (a._id && a._id === eventData._id))) return prev;
-          return [eventData, ...prev].slice(0, 20);
-        });
+        const alert = eventData.detail?.notification || eventData.notification || eventData.detail || eventData;
+          setLiveAlerts(prev => {
+            // Idempotency check to avoid duplicate injections
+            if (prev.some(a => (a.id && a.id === alert.id) || (a._id && a._id === alert._id))) return prev;
+            const next = [alert, ...prev];
+            // Sort by severity (critical first)
+            return next.sort((a, b) => {
+              const order = { critical: 0, high: 1, medium: 2, low: 3 };
+              return (order[a.severity as keyof typeof order] ?? 4) - (order[b.severity as keyof typeof order] ?? 4);
+            }).slice(0, 50);
+          });
         
         if (
           eventData.type === "new" ||
@@ -145,10 +149,21 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
           setUnacknowledged(prev => prev + 1);
         }
       }
-    });
+    };
+
+    socket.on("new_alert", handleAlert);
+    window.addEventListener("new_alert", handleAlert);
+
+    if (!socket.connected) {
+      socket.connect();
+    }
 
     return () => {
-      socket.disconnect();
+      socket.off("connect");
+      socket.off("connect_error");
+      socket.off("disconnect");
+      socket.off("new_alert", handleAlert);
+      window.removeEventListener("new_alert", handleAlert);
     };
   }, [showAll, fetchAlerts]);
 
@@ -216,7 +231,7 @@ export function AlertPanel({ maxAlerts = 5, showAll = false }: AlertPanelProps) 
 
               return (
                 <div
-                  key={alert.id || alert._id || index}
+                  key={`${alert.id || alert._id || 'alert'}-${index}`}
                   className={`
                     alert-card group relative p-4 rounded-lg border transition-all duration-300
                     ${

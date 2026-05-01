@@ -240,9 +240,9 @@ export function EmployeeDashboard() {
                 </Card>
               ) : (
                 <div className="flex flex-col gap-3">
-                  {(Array.isArray(notifications) ? notifications.filter(isNotSafe) : []).slice(0, 200).map((notification) => (
+                  {(Array.isArray(notifications) ? notifications.filter(isNotSafe) : []).slice(0, 200).map((notification, idx) => (
                     <NotificationCard 
-                      key={notification.notification_id}
+                      key={`${notification.notification_id}-${idx}`}
                       notification={notification}
                       bulkMode={bulkMode}
                       selectedIds={selectedIds}
@@ -276,9 +276,9 @@ export function EmployeeDashboard() {
               
               {!safeSectionCollapsed && (
                 <div className="flex flex-col gap-3">
-                  {notifications.filter(n => !isNotSafe(n)).slice(0, 200).map((notification) => (
+                  {notifications.filter(n => !isNotSafe(n)).slice(0, 200).map((notification, idx) => (
                     <NotificationCard 
-                      key={notification.notification_id}
+                      key={`${notification.notification_id}-${idx}`}
                       notification={notification}
                       bulkMode={false}
                       selectedIds={new Set()}
@@ -320,8 +320,13 @@ function NotificationCard({
   selectedExplanation,
   fetchExplanation,
 }: NotificationCardProps) {
-  const notSafe = isNotSafe(notification);
-  
+    const notSafe = (notification as any).risk >= 70 || (notification as any).confidence >= 0.7 || (notification as any).is_flagged;
+    const notifId = (notification as any).id || (notification as any).notification_id || '';
+    const source = (notification as any).source || (notification as any).source_app || 'System';
+    const messageText = (notification as any).message || (notification as any).content || '';
+    const riskLevel = (notification as any).risk_level || ((notification as any).severity === 'high' ? 'High' : (notification as any).severity === 'medium' ? 'Medium' : 'Low');
+    const riskPct = Math.round(((notification as any).confidence ?? (notification as any).risk_score ?? 0) * 100);
+
   return (
     <div className={`bg-card border border-border hover:border-muted-foreground/30 transition-colors p-4 rounded-lg ${
       notSafe ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-green-500'
@@ -330,7 +335,7 @@ function NotificationCard({
         {bulkMode && (
           <NotificationCheckbox
             notification={notification}
-            isSelected={selectedIds.has(notification.notification_id)}
+            isSelected={selectedIds.has(notifId)}
             onToggle={toggleSelect}
           />
         )}
@@ -342,17 +347,17 @@ function NotificationCard({
               ) : (
                 <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0" />
               )}
-              <span className="font-mono text-sm text-muted-foreground">{notification.notification_id}</span>
-              <Badge className={`${sourceAppColors[notification.source_app]} flex items-center gap-1`}>
-                {sourceAppIcons[notification.source_app]}
-                {notification.source_app}
+              <span className="font-mono text-sm text-muted-foreground">{notifId}</span>
+              <Badge className={`${sourceAppColors[source as SourceApp] || 'bg-zinc-700'} flex items-center gap-1`}>
+                {sourceAppIcons[source as SourceApp] || null}
+                {source}
               </Badge>
               <Badge className={
-                notification.risk_level === 'High' ? 'bg-red-500/20 text-red-400' :
-                notification.risk_level === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' :
+                riskLevel === 'High' ? 'bg-red-500/20 text-red-400' :
+                riskLevel === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' :
                 'bg-green-500/20 text-green-400'
               }>
-                {notification.risk_level} ({Math.round(notification.risk_score * 100)}%)
+                {riskLevel} ({riskPct}%)
               </Badge>
               <Badge variant="outline" className="text-muted-foreground">{notification.department}</Badge>
               {notSafe && (
@@ -364,52 +369,48 @@ function NotificationCard({
             
             <div className="flex items-center gap-2">
               <Shield className={`w-4 h-4 ${
-                notification.risk_level === 'High' ? 'text-red-500' :
-                notification.risk_level === 'Medium' ? 'text-yellow-500' : 'text-green-500'
+                riskLevel === 'High' ? 'text-red-500' :
+                riskLevel === 'Medium' ? 'text-yellow-500' : 'text-green-500'
               }`} />
               <span className={`text-sm font-medium ${
-                notification.risk_level === 'High' ? 'text-red-500' :
-                notification.risk_level === 'Medium' ? 'text-yellow-500' : 'text-green-500'
+                riskLevel === 'High' ? 'text-red-500' :
+                riskLevel === 'Medium' ? 'text-yellow-500' : 'text-green-500'
               }`}>
-                {Math.round(notification.risk_score * 100)}% Risk
+                {riskPct}% Risk
               </span>
             </div>
           </div>
           
-          <div className="grid grid-cols-3 gap-4 text-sm mb-3">
+          <div className="grid grid-cols-2 gap-4 text-sm mb-3">
             <div>
               <span className="text-muted-foreground">From: </span>
-              <span className="text-foreground">{notification.sender}</span>
+              <span className="text-foreground">{notification.sender || '—'}</span>
             </div>
             <div>
               <span className="text-muted-foreground">Department: </span>
               <span className="text-foreground">{notification.department}</span>
             </div>
-            <div>
-              <span className="text-muted-foreground">Source: </span>
-              <span className="text-foreground">{notification.source_app}</span>
-            </div>
           </div>
-          <p className="text-foreground bg-muted p-3 rounded-lg text-sm line-clamp-2 mb-2">{notification.content}</p>
+          <p className="text-foreground bg-muted p-3 rounded-lg text-sm line-clamp-2 mb-2">{messageText}</p>
           
           {notSafe && (
             <div className="mt-3">
               <button
-                onClick={() => fetchExplanation(notification.notification_id)}
+                onClick={() => fetchExplanation(notifId)}
                 className="text-cyan-400 hover:text-cyan-300 text-sm flex items-center gap-1"
               >
                 <Info className="w-4 h-4" />
                 Why was this flagged?
               </button>
               
-              {selectedExplanation[notification.notification_id] && (
+              {selectedExplanation[notifId] && (
                 <div className="mt-3 bg-cyan-900/20 border border-cyan-800 p-4 rounded-lg">
                   <p className="text-foreground text-sm mb-2">
-                    {selectedExplanation[notification.notification_id].explanation.explanation_text}
+                    {selectedExplanation[notifId].explanation.explanation_text}
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    {selectedExplanation[notification.notification_id].explanation.top_features.map((feature, idx) => (
-                      <Badge key={idx} className="bg-cyan-500/20 text-cyan-400 text-xs">
+                    {selectedExplanation[notifId].explanation.top_features.map((feature, fIdx) => (
+                      <Badge key={`${feature.feature}-${fIdx}`} className="bg-cyan-500/20 text-cyan-400 text-xs">
                         {feature.feature.replace(/_/g, ' ')}
                       </Badge>
                     ))}

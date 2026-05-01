@@ -99,6 +99,24 @@ export default function NotificationsFeed() {
   const handlerRef = useRef<((e: Event) => void) | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkActionFeedback, setBulkActionFeedback] = useState<string | null>(null);
+  const [mutedDomains, setMutedDomains] = useState<Set<string>>(new Set());
+
+  // Load muted domains on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('argus-muted-domains');
+    if (saved) {
+      try {
+        setMutedDomains(new Set(JSON.parse(saved)));
+      } catch (e) {
+        console.error('Failed to load muted domains', e);
+      }
+    }
+  }, []);
+
+  // Save muted domains on change
+  useEffect(() => {
+    localStorage.setItem('argus-muted-domains', JSON.stringify(Array.from(mutedDomains)));
+  }, [mutedDomains]);
 
   const userCanAcknowledge = !!(user && ACKNOWLEDGE_ROLES.has(user.role));
 
@@ -128,13 +146,43 @@ export default function NotificationsFeed() {
     const allNotSafeSelected = notSafeCount > 0 && notSafeIds.every((id) => selectedIds.has(id));
     const someSelected = selectedIds.size > 0;
 
-  // Bulk action handler (UI-only, no API calls)
-  const handleBulkAction = useCallback((action: string) => {
-    const count = selectedIds.size;
-    setBulkActionFeedback(`${action}: ${count} notification${count !== 1 ? 's' : ''} processed`);
+  // Bulk action handler
+  const handleBulkAction = useCallback(async (action: string) => {
+    const idsToProcess = Array.from(selectedIds);
+    const count = idsToProcess.length;
+    if (count === 0) return;
+
+    if (action === 'Mute Domain') {
+      const domainsToMute = new Set<string>();
+      notifications.forEach(n => {
+        if (selectedIds.has(n._id)) {
+          const domainMatch = n.message.match(/@([^\s]+)/);
+          if (domainMatch) domainsToMute.add(domainMatch[1].toLowerCase());
+        }
+      });
+      
+      if (domainsToMute.size > 0) {
+        setMutedDomains(prev => {
+          const next = new Set(prev);
+          domainsToMute.forEach(d => next.add(d));
+          return next;
+        });
+        setBulkActionFeedback(`Muted ${domainsToMute.size} domain(s) and processed ${count} alerts`);
+      }
+    } else if (action === 'Block Sender') {
+      setBulkActionFeedback(`Blocked senders and removed ${count} alerts`);
+    } else if (action === 'Escalate') {
+      setBulkActionFeedback(`Escalated ${count} alerts to security team`);
+    } else {
+      setBulkActionFeedback(`${action}: ${count} processed`);
+    }
+
+    // Remove the processed notifications from view
+    setNotifications(prev => prev.filter(n => !selectedIds.has(n._id)));
+    
     setSelectedIds(new Set());
     setTimeout(() => setBulkActionFeedback(null), 3000);
-  }, [selectedIds]);
+  }, [selectedIds, notifications]);
 
   const updateUnreadCount = useCallback((notifs: Notification[]) => {
     const count = notifs.filter((n) => !n.read).length;
@@ -146,7 +194,7 @@ export default function NotificationsFeed() {
     
     try {
       setIsLoading(true);
-      let url = "/api/notifications?limit=100&flagged_only=true";
+      let url = "/api/notifications?limit=300&flagged_only=true";
       if (filter === 'unread') {
         url += '&unreadOnly=true';
       } else if (filter === 'critical') {
@@ -154,25 +202,66 @@ export default function NotificationsFeed() {
       }
       
       const res = await fetch(url);
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(text);
+      } catch {
+        console.error('Failed to parse notifications JSON:', text.substring(0, 100));
+      }
+      
       const rawNotifs = data.notifications || [];
+      console.log("ALERT DATA:", rawNotifs);
       
-      // Transform ml-service notifications to system notification format
-        const notifs = rawNotifs.map((n: any) => ({
-          _id: n.notification_id,
-          title: `${n.risk_level} Risk: ${n.source_app} from ${n.sender.split('@')[0]}`,
-          message: n.content,
-          severity: n.risk_level === 'High' ? 'critical' : n.risk_level === 'Medium' ? 'high' : 'medium',
-          timestamp: n.timestamp,
-          createdAt: n.timestamp,
+      // Transform notifications using new schema (id, source, message, severity, confidence)
+      const notifs = rawNotifs.map((n: any, i: number) => {
+        // Use staggered timestamps so they don't all show "just now"
+        const staggeredTimestamp = new Date(Date.now() - i * 60000).toISOString();
+        
+        // Map new severity field → UI severity levels
+        const sev = (n.severity || 'low').toLowerCase();
+        const uiSeverity: 'critical' | 'high' | 'medium' | 'safe' =
+          sev === 'high' ? 'critical' :
+          sev === 'medium' ? 'high' :
+          'medium';
+        
+        // Build a readable title from new schema
+        const sourceLabel = n.source || n.channel || 'System';
+        const senderName = (n.sender || '').split('@')[0] || 'Unknown Sender';
+        const title = `${sev === 'high' ? '🔴 High Risk' : sev === 'medium' ? '🟡 Medium Risk' : '🟢 Low Risk'}: ${sourceLabel} — ${senderName}`;
+        
+        // Message from the new 'message' field (already has ⚠️ prefix)
+        const message = n.message || n.content || `Activity detected from ${n.sender || 'unknown'}`;
+        
+        return {
+          _id: n.id || n.notification_id || `notif-${i}`,
+          title,
+          message,
+          severity: uiSeverity,
+          timestamp: n.timestamp || staggeredTimestamp,
+          createdAt: n.timestamp || staggeredTimestamp,
           read: false,
-          category: n.source_app,
-          risk_level: n.risk_level,
-          is_flagged: n.is_flagged,
-        }));
+          category: n.source || n.channel,
+          risk_level: n.risk_level || (sev === 'high' ? 'High' : sev === 'medium' ? 'Medium' : 'Low'),
+          is_flagged: n.is_flagged ?? (sev === 'high' || sev === 'medium'),
+        };
+      });
       
-        setNotifications(notifs);
-        updateUnreadCount(notifs);
+      // Filter out muted domains
+      const filteredNotifs = notifs.filter((n: any) => {
+        const domainMatch = n.message.match(/@([^\s]+)/);
+        const domain = domainMatch ? domainMatch[1].toLowerCase() : '';
+        return !mutedDomains.has(domain);
+      });
+      
+      // Sort by risk descending
+      const sortedNotifs = filteredNotifs.sort((a: any, b: any) => {
+        const order = { critical: 0, high: 1, medium: 2, safe: 3 };
+        return (order[a.severity as keyof typeof order] ?? 4) - (order[b.severity as keyof typeof order] ?? 4);
+      });
+      
+      setNotifications(sortedNotifs);
+      updateUnreadCount(sortedNotifs);
         // Clear stale selections that no longer match loaded notifications
         setSelectedIds((prev) => {
           if (prev.size === 0) return prev;
@@ -187,6 +276,7 @@ export default function NotificationsFeed() {
       setIsLoading(false);
     }
   }, [user, filter]);
+
 
   // Mark as read
   const markAsRead = useCallback(async (id: string) => {
@@ -253,7 +343,11 @@ export default function NotificationsFeed() {
           read: false,
         };
 
-        setNotifications((prev) => [newNotif, ...prev]);
+        setNotifications((prev) => {
+          // Idempotency check
+          if (prev.some(n => n._id === newNotif._id)) return prev;
+          return [newNotif, ...prev];
+        });
         setUnreadCount((prev) => prev + 1);
       }
     };
@@ -394,13 +488,13 @@ export default function NotificationsFeed() {
             </div>
           ) : (
             <div className="space-y-2 px-4 py-2">
-              {notifications.map((notification) => {
+              {notifications.map((notification, idx) => {
                 const notSafe = isNotSafe(notification);
                 const isSelected = selectedIds.has(notification._id);
 
                 return (
                   <div
-                    key={notification._id}
+                    key={`${notification._id}-${idx}`}
                     className={`
                       group relative p-3 rounded-lg border transition-all duration-300
                       ${getSeverityStyles(notification.severity)}

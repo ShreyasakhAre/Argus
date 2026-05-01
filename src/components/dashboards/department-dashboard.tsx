@@ -19,6 +19,7 @@ import {
   NotificationCheckbox,
   isNotSafe
 } from '@/components/notification-bulk-actions';
+import { ThreatPatterns } from '@/components/threat-patterns';
 
 const sourceAppIcons: Record<string, React.ReactNode> = {
   'Email': <Mail className="w-4 h-4" />,
@@ -98,24 +99,73 @@ export function DepartmentHeadDashboard() {
 
   const fetchHeatmap = async () => {
     setLoading(true);
-    const [heatmapRes, notifRes] = await Promise.all([
-      fetch(`/api/heatmap?org_id=${orgId}`),
-      fetch(`/api/notifications?org_id=${orgId}`)
-    ]);
-    const heatmapData = await heatmapRes.json();
-    const notifData = await notifRes.json();
-    setHeatmapData(heatmapData.heatmap);
-    setNotifications(notifData.notifications);
-    setLoading(false);
+    try {
+      const [heatmapRes, notifRes] = await Promise.all([
+        fetch(`/api/heatmap?org_id=${orgId}`),
+        fetch(`/api/notifications?org_id=${orgId}&limit=300`)
+      ]);
+
+      // Safe parse heatmap
+      let heatmapResult: any = {};
+      try {
+        const text = await heatmapRes.text();
+        heatmapResult = JSON.parse(text);
+      } catch { console.error('Failed to parse heatmap'); }
+
+      // Safe parse notifications
+      let notifResult: any = {};
+      try {
+        const text = await notifRes.text();
+        notifResult = JSON.parse(text);
+      } catch { console.error('Failed to parse notifications'); }
+
+      const notifs = notifResult.notifications || [];
+
+      // Build heatmap from notifications if API heatmap is empty
+      let heatmap = heatmapResult.heatmap;
+      if (!heatmap || Object.keys(heatmap).length === 0) {
+        heatmap = {};
+        for (const n of notifs) {
+          const dept = n.department || 'Unknown';
+          if (!heatmap[dept]) {
+            heatmap[dept] = { total: 0, flagged: 0, high_risk: 0, medium_risk: 0, low_risk: 0, avg_risk_score: 0, flagged_percentage: 0 };
+          }
+          heatmap[dept].total++;
+          const conf = n.confidence ?? n.risk_score ?? 0;
+          if (n.severity === 'high' || n.is_flagged) { heatmap[dept].flagged++; heatmap[dept].high_risk++; }
+          else if (n.severity === 'medium') { heatmap[dept].medium_risk++; }
+          else { heatmap[dept].low_risk++; }
+          heatmap[dept].avg_risk_score = ((heatmap[dept].avg_risk_score * (heatmap[dept].total - 1)) + conf) / heatmap[dept].total;
+          heatmap[dept].flagged_percentage = (heatmap[dept].flagged / heatmap[dept].total) * 100;
+        }
+      }
+
+      setHeatmapData(heatmap);
+      setNotifications(notifs);
+    } catch (err) {
+      console.error('Department dashboard fetch error:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  if (loading || !heatmapData) {
+  if (loading) {
     return <div className="flex items-center justify-center h-64"><RefreshCw className="w-8 h-8 animate-spin text-cyan-500" /></div>;
+  }
+
+  if (!heatmapData || Object.keys(heatmapData).length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 gap-3">
+        <RefreshCw className="w-8 h-8 text-zinc-500" />
+        <p className="text-zinc-400">No department data available</p>
+        <button onClick={fetchHeatmap} className="text-sm text-cyan-400 hover:text-cyan-300">Retry</button>
+      </div>
+    );
   }
 
   const chartData = Object.entries(heatmapData).map(([dept, data]) => ({
     department: dept,
-    avgRisk: Math.round(data.avg_risk_score * 100),
+    avgRisk: ((data.avg_risk_score ) > 1 ? Math.round(data.avg_risk_score ) : Math.round((data.avg_risk_score ) * 100)),
     flagged: data.flagged,
     total: data.total,
     highRisk: data.high_risk,
@@ -239,7 +289,9 @@ export function DepartmentHeadDashboard() {
       </div>
 
       {activeTab === 'overview' && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Dialog open={showDepartmentsModal} onOpenChange={setShowDepartmentsModal}>
             <DialogTrigger asChild>
               <Card className="bg-zinc-900 border-zinc-800 hover:border-zinc-700 transition-all hover:scale-105 cursor-pointer">
@@ -259,9 +311,9 @@ export function DepartmentHeadDashboard() {
                 <DialogTitle className="text-white">Department Details</DialogTitle>
               </DialogHeader>
               <div className="overflow-y-auto max-h-[calc(80vh-120px)] space-y-3">
-                {Object.entries(heatmapData).map(([dept, data]) => (
+                {Object.entries(heatmapData).map(([dept, data], idx) => (
                   <div 
-                    key={dept}
+                    key={`${dept}-${idx}`}
                     className="bg-zinc-800 border border-zinc-700 rounded-lg p-4 hover:bg-zinc-700 transition-colors cursor-pointer"
                     onClick={() => {
                       setSelectedDepartment(dept);
@@ -292,7 +344,7 @@ export function DepartmentHeadDashboard() {
                       </div>
                       <div>
                         <span className="text-zinc-400">Avg Risk: </span>
-                        <span className="text-white font-medium">{Math.round(data.avg_risk_score * 100)}%</span>
+                        <span className="text-white font-medium">{((data.avg_risk_score ) > 1 ? Math.round(data.avg_risk_score ) : Math.round((data.avg_risk_score ) * 100))}%</span>
                       </div>
                       <div className={`col-span-3 ${departmentSecurityScores.find(s => s.department === dept)?.formatted.bgColor || 'bg-zinc-800'} ${departmentSecurityScores.find(s => s.department === dept)?.formatted.borderColor || 'border-zinc-700'} rounded p-2`}>
                         <span className="text-zinc-400 text-xs">Security Score: </span>
@@ -357,17 +409,36 @@ export function DepartmentHeadDashboard() {
                   <div>
                     <p className="text-sm text-zinc-400">Avg Risk Score</p>
                     <p className="text-3xl font-bold" style={{ color: getRiskColor(avgRisk) }}>
-                      {Math.round(avgRisk * 100)}%
+                      {((avgRisk ) > 1 ? Math.round(avgRisk ) : Math.round((avgRisk ) * 100))}%
                     </p>
                   </div>
                   <TrendingUp className="w-10 h-10" style={{ color: getRiskColor(avgRisk) }} />
                 </div>
               </CardContent>
-            </Card>
-            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-xs text-zinc-300 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10">
-              Average risk score = sum(risk_score) / total notifications
-              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-zinc-800"></div>
+              </Card>
             </div>
+            
+            </div>
+            
+            <ThreatPatterns />
+          </div>
+
+          <div className="lg:col-span-1 space-y-6">
+            {/* Additional Context or Actions can go here */}
+            <Card className="bg-zinc-900 border-zinc-800 h-full min-h-[400px]">
+              <CardHeader>
+                <CardTitle className="text-white">Security Summary</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4 text-sm text-zinc-400">
+                  <p>Overview of current threat landscape across all departments.</p>
+                  <div className="p-3 bg-cyan-500/5 border border-cyan-500/20 rounded-lg">
+                    <p className="text-cyan-400 font-medium mb-1">Active Monitoring</p>
+                    <p className="text-xs">System is currently analyzing live traffic from all integrated source applications.</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </div>
         </div>
       )}
@@ -422,9 +493,9 @@ export function DepartmentHeadDashboard() {
                 </Card>
               ) : (
                 <div className="flex flex-col gap-3">
-                  {notifications.filter(isNotSafe).filter(n => selectedDepartment ? n.department === selectedDepartment : true).slice(0, 200).map((notification) => (
+                  {notifications.filter(isNotSafe).filter(n => selectedDepartment ? n.department === selectedDepartment : true).slice(0, 200).map((notification, idx) => (
                     <NotificationCard 
-                      key={notification.notification_id}
+                      key={`${notification.notification_id}-${idx}`}
                       notification={notification}
                       bulkMode={bulkMode}
                       selectedIds={selectedIds}
@@ -455,9 +526,9 @@ export function DepartmentHeadDashboard() {
               
               {!safeSectionCollapsed && (
                 <div className="flex flex-col gap-3">
-                  {notifications.filter(n => !isNotSafe(n)).filter(n => selectedDepartment ? n.department === selectedDepartment : true).slice(0, 200).map((notification) => (
+                  {notifications.filter(n => !isNotSafe(n)).filter(n => selectedDepartment ? n.department === selectedDepartment : true).slice(0, 200).map((notification, idx) => (
                     <NotificationCard 
-                      key={notification.notification_id}
+                      key={`${notification.notification_id}-${idx}`}
                       notification={notification}
                       bulkMode={false}
                       selectedIds={new Set()}
@@ -479,9 +550,9 @@ export function DepartmentHeadDashboard() {
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {chartData.map((dept) => (
+                {chartData.map((dept, idx) => (
                   <div 
-                    key={dept.department}
+                    key={`${dept.department}-${idx}`}
                     className="relative p-4 rounded-lg border border-zinc-700 overflow-hidden"
                     style={{
                       background: `linear-gradient(135deg, ${getRiskColor(dept.avgRisk / 100)}20 0%, transparent 100%)`
@@ -567,8 +638,8 @@ export function DepartmentHeadDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {chartData.map((dept) => (
-                      <tr key={dept.department} className="border-b border-zinc-800 hover:bg-zinc-800/50">
+                    {chartData.map((dept, idx) => (
+                      <tr key={`${dept.department}-${idx}`} className="border-b border-zinc-800 hover:bg-zinc-800/50">
                         <td className="py-3 px-4 text-white font-medium">{dept.department}</td>
                         <td className="text-center py-3 px-4 text-zinc-300">{dept.total}</td>
                         <td className="text-center py-3 px-4">
@@ -616,6 +687,13 @@ function NotificationCard({
 }: NotificationCardProps) {
   const notSafe = isNotSafe(notification);
   
+  // Support both new schema (id, source, message, severity, confidence) and legacy
+  const notifId = (notification as any).id || (notification as any).notification_id || '';
+  const source = (notification as any).source || (notification as any).source_app || (notification as any).channel || 'System';
+  const messageText = (notification as any).message || (notification as any).content || '';
+  const riskLevel = (notification as any).risk_level || ((notification as any).severity === 'high' ? 'High' : (notification as any).severity === 'medium' ? 'Medium' : 'Low');
+  const riskPct = Math.round(((notification as any).confidence ?? (notification as any).risk_score ?? 0) * 100);
+
   return (
     <div className={`bg-zinc-900 border border-zinc-800 hover:border-zinc-700 transition-colors p-4 rounded-lg ${
       notSafe ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-green-500'
@@ -624,7 +702,7 @@ function NotificationCard({
         {bulkMode && (
           <NotificationCheckbox
             notification={notification}
-            isSelected={selectedIds.has(notification.notification_id)}
+            isSelected={selectedIds.has(notifId)}
             onToggle={toggleSelect}
           />
         )}
@@ -636,33 +714,31 @@ function NotificationCard({
               ) : (
                 <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0" />
               )}
-              <span className="font-mono text-sm text-zinc-400">{notification.notification_id}</span>
-              <Badge className={`${sourceAppColors[notification.source_app]} flex items-center gap-1`}>
-                {sourceAppIcons[notification.source_app]}
-                {notification.source_app}
+              <span className="font-mono text-sm text-zinc-400">{notifId}</span>
+              <Badge className={`${sourceAppColors[source] || 'bg-zinc-700 text-zinc-300'} flex items-center gap-1`}>
+                {sourceAppIcons[source] || null}
+                {source}
               </Badge>
               <Badge className={
-                notification.risk_level === 'High' ? 'bg-red-500/20 text-red-400' :
-                notification.risk_level === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' :
+                riskLevel === 'High' ? 'bg-red-500/20 text-red-400' :
+                riskLevel === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' :
                 'bg-green-500/20 text-green-400'
               }>
-                {notification.risk_level} ({Math.round(notification.risk_score * 100)}%)
+                {riskLevel} ({riskPct}%)
               </Badge>
               <Badge variant="outline" className="text-zinc-400">{notification.department}</Badge>
               {notSafe && (
-                <Badge className="bg-red-500/20 text-red-400">
-                  Not Safe
-                </Badge>
+                <Badge className="bg-red-500/20 text-red-400">Not Safe</Badge>
               )}
             </div>
           </div>
-          
+
           <div className="grid grid-cols-2 gap-4 text-sm mb-3">
-            <div><span className="text-zinc-400">From: </span><span className="text-white">{notification.sender}</span></div>
-            <div><span className="text-zinc-400">To: </span><span className="text-white">{notification.receiver}</span></div>
+            <div><span className="text-zinc-400">From: </span><span className="text-white">{notification.sender || '—'}</span></div>
+            <div><span className="text-zinc-400">To: </span><span className="text-white">{notification.receiver || '—'}</span></div>
           </div>
-          <p className="text-white bg-zinc-800 p-3 rounded-lg text-sm line-clamp-2 mb-2">{notification.content}</p>
-          <p className="text-xs text-zinc-400">{notification.timestamp}</p>
+          <p className="text-white bg-zinc-800 p-3 rounded-lg text-sm line-clamp-2 mb-2">{messageText}</p>
+          <p className="text-xs text-zinc-400">{notification.timestamp ? new Date(notification.timestamp).toLocaleString() : '—'}</p>
         </div>
       </div>
     </div>

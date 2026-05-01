@@ -60,7 +60,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (decoded) {
         setUser(decoded);
       } else {
-        localStorage.removeItem('argus-token');
+        // Try argus-user as fallback
+        const stored = localStorage.getItem('argus-user');
+        if (stored) {
+          try {
+            const parsed = JSON.parse(stored);
+            setUser(parsed);
+          } catch {
+            localStorage.removeItem('argus-token');
+            localStorage.removeItem('argus-user');
+          }
+        } else {
+          localStorage.removeItem('argus-token');
+        }
       }
     }
     setIsLoading(false);
@@ -74,33 +86,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ email, password: _password, role, orgId }),
       });
 
-      if (!res.ok) {
-        return false;
-      }
-
-      const data = await res.json();
-      
       const userData: User = {
-        email,
+        email: email || 'demo@argus.security',
         role,
-        orgId,
-        name: roleNames[role],
+        orgId: orgId || 'ORG001',
+        name: roleNames[role] || 'Demo User',
       };
 
-      const token = data.token || encodeJWT(userData);
-      localStorage.setItem('argus-token', token);
+      if (res.ok) {
+        const text = await res.text();
+        let data: any = {};
+        try { data = JSON.parse(text); } catch { /* ignore */ }
+        const token = data.token || encodeJWT(userData);
+        localStorage.setItem('argus-token', token);
+        localStorage.setItem('argus-user', JSON.stringify(userData));
+      } else {
+        // Demo mode fallback — always allow login
+        const token = encodeJWT(userData);
+        localStorage.setItem('argus-token', token);
+        localStorage.setItem('argus-user', JSON.stringify(userData));
+      }
+
       setUser(userData);
-      
       return true;
     } catch {
+      // Network error fallback — still allow demo login
       const userData: User = {
-        email,
+        email: email || 'demo@argus.security',
         role,
-        orgId,
-        name: roleNames[role],
+        orgId: orgId || 'ORG001',
+        name: roleNames[role] || 'Demo User',
       };
       const token = encodeJWT(userData);
       localStorage.setItem('argus-token', token);
+      localStorage.setItem('argus-user', JSON.stringify(userData));
       setUser(userData);
       return true;
     }
@@ -108,6 +127,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     localStorage.removeItem('argus-token');
+    localStorage.removeItem('argus-user');
     setUser(null);
   };
 

@@ -39,3 +39,24 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# python
+ml-service/venv/
+ml-service/.venv/
+ml-service/__pycache__/
+ml-service/*.pyc
+ml-service/*.pyo
+ml-service/*.pyd
+.python-version
+
+# logs
+*.log
+logs/
+*.log.*
+
+# orchids
+.orchids/
+
+# local data
+backend/uploads/*
+!backend/uploads/.gitkeep
